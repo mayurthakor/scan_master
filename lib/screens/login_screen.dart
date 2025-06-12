@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -8,22 +9,76 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Use a GlobalKey to uniquely identify our Form widget
   final _formKey = GlobalKey<FormState>();
-
-  // This boolean will help us switch between Login and Signup modes
   bool _isLoginMode = true;
+  bool _isLoading = false; // To show a loading spinner
 
-  // Controllers to read the text from our input fields
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  // We'll clean up the controllers when the widget is removed
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  // This function will handle all the Firebase logic
+  Future<void> _submit() async {
+    // First, validate the input fields
+    final isValid = _formKey.currentState!.validate();
+    if (!isValid) {
+      return; // If form is not valid, do nothing
+    }
+
+    setState(() {
+      _isLoading = true; // Show loading spinner
+    });
+
+    try {
+      if (_isLoginMode) {
+        // Log user in
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+      } else {
+        // Sign user up
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+      }
+      // After login/signup, you would typically navigate to the home screen
+      // We will add that navigation logic later.
+    } on FirebaseAuthException catch (error) {
+      // Handle Firebase-specific errors
+      String errorMessage = 'An error occurred, please check your credentials.';
+      if (error.message != null) {
+        errorMessage = error.message!;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } catch (error) {
+      // Handle other potential errors
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('An unexpected error occurred.'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
+
+    // This check ensures we don't try to update state if the widget is no longer in the tree
+    if (mounted) {
+      setState(() {
+        _isLoading = false; // Hide loading spinner
+      });
+    }
   }
 
   @override
@@ -32,7 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
       appBar: AppBar(
         title: Text(_isLoginMode ? 'Login to Scan Master' : 'Create Account'),
       ),
-      body: SingleChildScrollView( // Makes the screen scrollable if content overflows
+      body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Form(
@@ -40,7 +95,6 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // A nice icon at the top
                 const Icon(Icons.document_scanner, size: 100, color: Colors.blue),
                 const SizedBox(height: 30),
 
@@ -70,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: Icon(Icons.lock),
                     border: OutlineInputBorder(),
                   ),
-                  obscureText: true, // Hides the password text
+                  obscureText: true,
                   validator: (value) {
                     if (value == null || value.isEmpty || value.length < 6) {
                       return 'Password must be at least 6 characters';
@@ -80,33 +134,34 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 30),
 
-                // The main Login/Signup Button
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    textStyle: const TextStyle(fontSize: 18),
+                // Show a spinner if loading, otherwise show the button
+                if (_isLoading)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      textStyle: const TextStyle(fontSize: 18),
+                    ),
+                    onPressed: _submit, // Call our new _submit function
+                    child: Text(_isLoginMode ? 'Login' : 'Sign Up'),
                   ),
-                  onPressed: () {
-                    // We will add Firebase logic here later
-                  },
-                  child: Text(_isLoginMode ? 'Login' : 'Sign Up'),
-                ),
                 const SizedBox(height: 16),
 
                 // The button to switch between modes
-                TextButton(
-                  onPressed: () {
-                    // setState tells Flutter to rebuild the screen with the new mode
-                    setState(() {
-                      _isLoginMode = !_isLoginMode;
-                    });
-                  },
-                  child: Text(
-                    _isLoginMode
-                        ? 'Don\'t have an account? Sign Up'
-                        : 'Already have an account? Login',
+                if (!_isLoading) // Also hide this when loading
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _isLoginMode = !_isLoginMode;
+                      });
+                    },
+                    child: Text(
+                      _isLoginMode
+                          ? 'Don\'t have an account? Sign Up'
+                          : 'Already have an account? Login',
+                    ),
                   ),
-                ),
               ],
             ),
           ),

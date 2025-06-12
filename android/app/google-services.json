@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "757169597458",
+    "project_id": "scan-master-app",
+    "storage_bucket": "scan-master-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:757169597458:android:d3fb9c540c7516dca0bccb",
+        "android_client_info": {
+          "package_name": "com.example.scan_master"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJ7Tj6isll4gKM-cr1AfK_vvUfB1JbVGw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

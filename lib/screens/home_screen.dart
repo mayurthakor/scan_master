@@ -4,6 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:scan_master/screens/pdf_viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,12 +16,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // We'll hold the upload task in our state to monitor it.
   UploadTask? _uploadTask;
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
-  Future<void> _saveFileMetadata(
-      String fileName, String storagePath, String userId) async {
+  Future<void> _saveFileMetadata(String fileName, String storagePath, String userId) async {
     await FirebaseFirestore.instance.collection('files').add({
       'userId': userId,
       'originalFileName': fileName,
@@ -39,34 +40,70 @@ class _HomeScreenState extends State<HomeScreen> {
     final String path = 'uploads/$userId/$fileName';
     final Reference storageRef = FirebaseStorage.instance.ref().child(path);
 
-    // Create the upload task
     final uploadTask = storageRef.putFile(File(image.path));
 
-    // Call setState ONCE to start showing the progress bar
     setState(() {
       _uploadTask = uploadTask;
     });
 
     try {
-      // Await the task to complete
       await uploadTask;
-
-      // Save metadata after successful upload
       await _saveFileMetadata(image.name, path, userId);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Upload Complete!')),
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload Complete!')),
+        );
+      }
+    } on FirebaseException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload Failed: ${e.message}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadTask = null;
+        });
+      }
+    }
+  }
+
+  // In lib/screens/home_screen.dart
+
+  // This function now opens our new in-app PDF viewer screen
+  Future<void> _viewPdf(String documentId) async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('get-download-url');
+      final response = await callable.call<Map<String, dynamic>>({
+        'documentId': documentId,
+        'userId': currentUser!.uid,
+      });
+
+      Navigator.of(context).pop(); // Close loading indicator
+
+      final String url = response.data['url'];
+
+      // Navigate to the new screen, passing the URL
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => PdfViewerScreen(url: url),
+        ),
       );
 
-    } on FirebaseException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload Failed: ${e.message}')),
-      );
-    } finally {
-      // Call setState ONCE to hide the progress bar
-      setState(() {
-        _uploadTask = null;
-      });
+    } on FirebaseFunctionsException catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error from server: ${e.message}')));
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('An unexpected error occurred: $e')));
     }
   }
 
@@ -82,7 +119,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => FirebaseAuth.instance.signOut(),
           ),
         ],
-        // We'll show a LinearProgressIndicator at the bottom of the AppBar during upload
         bottom: _uploadTask != null
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(4.0),
@@ -100,7 +136,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _buildFilesList(),
       floatingActionButton: FloatingActionButton(
-        // Disable the button during an upload
         onPressed: _uploadTask != null ? null : _pickAndUploadImage,
         tooltip: 'Upload Image',
         child: _uploadTask != null
@@ -117,9 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // In lib/screens/home_screen.dart
-
-Widget _buildFilesList() {
+  Widget _buildFilesList() {
     if (currentUser == null) return const Center(child: Text('Please log in.'));
 
     return StreamBuilder<QuerySnapshot>(
@@ -129,32 +162,16 @@ Widget _buildFilesList() {
           .orderBy('uploadTimestamp', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && _uploadTask == null) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        
-        // THIS IS THE IMPORTANT CHANGE
         if (snapshot.hasError) {
-          // Explicitly print the error to the debug console
-          print("!!! FIRESTORE QUERY ERROR: ${snapshot.error}"); 
-          
-          // Also display the error directly on the screen
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                'DATABASE ERROR:\n\n${snapshot.error}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
-              ),
-            ),
-          );
+          return Center(child: Text('DATABASE ERROR:\n\n${snapshot.error}'));
         }
-
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const Center(
             child: Text(
-              'No files uploaded yet.',
+              'No files uploaded yet. Press + to begin.',
               style: TextStyle(fontSize: 18, color: Colors.grey),
             ),
           );
@@ -166,10 +183,18 @@ Widget _buildFilesList() {
           itemCount: files.length,
           itemBuilder: (context, index) {
             final fileData = files[index].data() as Map<String, dynamic>;
+            final String status = fileData['status'] ?? 'Unknown';
+            final bool isCompleted = status == 'Completed';
+
             return ListTile(
-              leading: const Icon(Icons.image, color: Colors.blue),
-              title: Text(fileData['originalFileName'] ?? 'No filename', maxLines: 1, overflow: TextOverflow.ellipsis,),
-              subtitle: Text('Status: ${fileData['status'] ?? 'Unknown'}'),
+              leading: Icon(
+                isCompleted ? Icons.picture_as_pdf : Icons.image,
+                color: isCompleted ? Colors.green : Colors.blue,
+              ),
+              title: Text(fileData['originalFileName'] ?? 'No filename', maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text('Status: $status'),
+              onTap: isCompleted ? () => _viewPdf(files[index].id) : null,
+              trailing: isCompleted ? const Icon(Icons.download_for_offline) : null,
             );
           },
         );

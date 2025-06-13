@@ -1,0 +1,5 @@
+google-cloud-storage
+google-cloud-firestore
+firebase-admin
+functions-framework
+Flask

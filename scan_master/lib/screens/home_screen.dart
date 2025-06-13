@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:scan_master/screens/pdf_viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -19,6 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
   UploadTask? _uploadTask;
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
+  // Saves metadata about the file to Firestore after a successful upload
   Future<void> _saveFileMetadata(String fileName, String storagePath, String userId) async {
     await FirebaseFirestore.instance.collection('files').add({
       'userId': userId,
@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // Handles picking an image from the gallery and starting the upload process
   Future<void> _pickAndUploadImage() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
@@ -69,11 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // In lib/screens/home_screen.dart
-
-  // This function now opens our new in-app PDF viewer screen
+  // Calls the backend to get a signed URL and opens the PDF viewer screen
   Future<void> _viewPdf(String documentId) async {
-    // Show loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -90,8 +88,8 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.of(context).pop(); // Close loading indicator
 
       final String url = response.data['url'];
-
-      // Navigate to the new screen, passing the URL
+      
+      // Navigate to the new in-app viewer screen
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => PdfViewerScreen(url: url),
@@ -101,6 +99,56 @@ class _HomeScreenState extends State<HomeScreen> {
     } on FirebaseFunctionsException catch (e) {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error from server: ${e.message}')));
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('An unexpected error occurred: $e')));
+    }
+  }
+
+  // Shows a confirmation dialog before deleting a file
+  Future<bool> _showDeleteConfirmationDialog() async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Are you sure?'),
+        content: const Text('Do you want to permanently delete this file? This action cannot be undone.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    ) ?? false; // Return false if dialog is dismissed
+  }
+
+  // Calls the new backend function to delete the file
+  Future<void> _deleteFile(String documentId) async {
+    final bool confirmed = await _showDeleteConfirmationDialog();
+    if (!confirmed || currentUser == null) return;
+
+    showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator()));
+
+    try {
+      HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('delete-file');
+      // We pass the documentId. The backend will verify ownership using the auth token.
+      await callable.call<Map<String, dynamic>>({
+        'documentId': documentId,
+      });
+      
+      // The StreamBuilder will automatically remove the item from the list.
+      // We just need to close the dialog.
+      Navigator.of(context).pop(); 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File deleted successfully.')));
+
+    } on FirebaseFunctionsException catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     } catch (e) {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('An unexpected error occurred: $e')));
@@ -152,6 +200,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // In lib/screens/home_screen.dart
+// Replace the entire _buildFilesList widget with this one.
+
   Widget _buildFilesList() {
     if (currentUser == null) return const Center(child: Text('Please log in.'));
 
@@ -185,16 +236,37 @@ class _HomeScreenState extends State<HomeScreen> {
             final fileData = files[index].data() as Map<String, dynamic>;
             final String status = fileData['status'] ?? 'Unknown';
             final bool isCompleted = status == 'Completed';
+            final String originalFileName = fileData['originalFileName'] ?? 'No filename';
+
+            // --- NEW LOGIC for Display Name ---
+            String displayName;
+            if (isCompleted) {
+              // If completed, show the base name with a .pdf extension
+              final baseName = originalFileName.contains('.')
+                  ? originalFileName.substring(0, originalFileName.lastIndexOf('.'))
+                  : originalFileName;
+              displayName = '$baseName.pdf';
+            } else {
+              // Otherwise, show the original filename
+              displayName = originalFileName;
+            }
+            // --- END OF NEW LOGIC ---
 
             return ListTile(
               leading: Icon(
                 isCompleted ? Icons.picture_as_pdf : Icons.image,
                 color: isCompleted ? Colors.green : Colors.blue,
+                size: 36, // Making the icon a little bigger
               ),
-              title: Text(fileData['originalFileName'] ?? 'No filename', maxLines: 1, overflow: TextOverflow.ellipsis),
+              title: Text(displayName, maxLines: 2, overflow: TextOverflow.ellipsis),
               subtitle: Text('Status: $status'),
               onTap: isCompleted ? () => _viewPdf(files[index].id) : null,
-              trailing: isCompleted ? const Icon(Icons.download_for_offline) : null,
+              trailing: IconButton(
+                icon: const Icon(Icons.delete),
+                color: Theme.of(context).colorScheme.error,
+                tooltip: 'Delete File',
+                onPressed: () => _deleteFile(files[index].id),
+              ),
             );
           },
         );

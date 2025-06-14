@@ -29,6 +29,46 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // Paste this function inside your _HomeScreenState class
+
+  Future<void> _createSubscriptionOrder(BuildContext context) async {
+    // Show a loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // Note: It's good practice to specify the region, just like in your other functions.
+      FirebaseFunctions functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+      
+      // Reference the callable function by its deployed name 
+      final HttpsCallable callable = functions.httpsCallable('create-subscription-order');
+
+      // Call the function
+      final HttpsCallableResult result = await callable.call();
+
+      // Close the loading dialog
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      // Print the data from the backend to the debug console
+      print("Successfully created Razorpay order: ${result.data}");
+      
+      // We will use this data in the next step to launch Razorpay checkout
+      
+    } on FirebaseFunctionsException catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
+      print('Functions Error: ${e.code} - ${e.message}');
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An unexpected error occurred.')));
+      print('Generic Error: $e');
+    }
+  }
   // Handles picking an image from the gallery and starting the upload process
   Future<void> _pickAndUploadImage() async {
     final ImagePicker picker = ImagePicker();
@@ -155,50 +195,58 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Files'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-            onPressed: () => FirebaseAuth.instance.signOut(),
-          ),
-        ],
-        bottom: _uploadTask != null
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(4.0),
-                child: StreamBuilder<TaskSnapshot>(
-                  stream: _uploadTask!.snapshotEvents,
-                  builder: (context, snapshot) {
-                    final progress = snapshot.hasData
-                        ? snapshot.data!.bytesTransferred / snapshot.data!.totalBytes
-                        : 0.0;
-                    return LinearProgressIndicator(value: progress);
-                  },
-                ),
-              )
-            : null,
-      ),
-      body: _buildFilesList(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _uploadTask != null ? null : _pickAndUploadImage,
-        tooltip: 'Upload Image',
-        child: _uploadTask != null
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
-                ),
-              )
-            : const Icon(Icons.add),
-      ),
-    );
-  }
+    @override
+    Widget build(BuildContext context) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('My Files'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              onPressed: () => FirebaseAuth.instance.signOut(),
+            ),
+            // Add this button
+            ElevatedButton(
+              onPressed: () {
+                // We will call the function here
+                _createSubscriptionOrder(context);
+              },
+              child: Text("Subscribe"),
+            ),
+          ],
+          bottom: _uploadTask != null
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(4.0),
+                  child: StreamBuilder<TaskSnapshot>(
+                    stream: _uploadTask!.snapshotEvents,
+                    builder: (context, snapshot) {
+                      final progress = snapshot.hasData
+                          ? snapshot.data!.bytesTransferred / snapshot.data!.totalBytes
+                          : 0.0;
+                      return LinearProgressIndicator(value: progress);
+                    },
+                  ),
+                )
+              : null,
+        ),
+        body: _buildFilesList(),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _uploadTask != null ? null : _pickAndUploadImage,
+          tooltip: 'Upload Image',
+          child: _uploadTask != null
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 3,
+                  ),
+                )
+              : const Icon(Icons.add),
+        ),
+      );
+    }
 
   // In lib/screens/home_screen.dart
 // Replace the entire _buildFilesList widget with this one.

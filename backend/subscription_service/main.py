@@ -5,12 +5,10 @@ from google.cloud import secretmanager
 import razorpay
 import functions_framework
 from flask import jsonify
+import time
 
 # Initialize Firebase Admin SDK
 firebase_admin.initialize_app()
-
-# Initialize Razorpay client. We will populate the keys inside the function.
-razorpay_client = None
 
 def access_secret_version(secret_id, project_id, version_id="latest"):
     """Accesses a secret version."""
@@ -24,8 +22,6 @@ def create_subscription_order(request):
     """
     HTTPS Callable function to create a Razorpay Order for a subscription.
     """
-    global razorpay_client
-
     # Standard CORS preflight handling
     if request.method == 'OPTIONS':
         headers = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization'}
@@ -39,24 +35,21 @@ def create_subscription_order(request):
             raise ValueError("Unauthorized")
         id_token = auth_header.split('Bearer ')[1]
         decoded_token = auth.verify_id_token(id_token)
-        # uid = decoded_token['uid'] # We have the user's ID if needed later
+        uid = decoded_token['uid']
 
-        # --- 2. Initialize Razorpay client if not already done ---
-        if razorpay_client is None:
-            project_id = os.environ.get('GCP_PROJECT')
-            key_id = os.environ.get('RAZORPAY_KEY_ID')
-            secret_name = os.environ.get('RAZORPAY_SECRET_NAME')
-            
-            key_secret = access_secret_version(secret_name, project_id)
-            
-            razorpay_client = razorpay.Client(auth=(key_id, key_secret))
+        # --- 2. Get credentials ---
+        project_id = os.environ.get('GCP_PROJECT')
+        key_id = os.environ.get('RAZORPAY_KEY_ID')
+        
+        # We now directly use the known secret name
+        key_secret = access_secret_version('razorpay-key-secret', project_id)
+        
+        razorpay_client = razorpay.Client(auth=(key_id, key_secret))
 
         # --- 3. Create a Razorpay Order ---
-        # For now, we hardcode the amount. This would come from your subscription plan.
-        # Amount is in the smallest currency unit (e.g., paise for INR). 49900 paise = ₹499.
         order_amount = 49900 
         order_currency = 'INR'
-        order_receipt = f'receipt_{decoded_token["uid"]}_{datetime.datetime.now().timestamp()}'
+        order_receipt = f'rcpt_{uid[-12:]}_{int(time.time())}'
 
         order = razorpay_client.order.create({
             'amount': order_amount,
@@ -64,14 +57,14 @@ def create_subscription_order(request):
             'receipt': order_receipt
         })
 
-        print(f"Created Razorpay order {order['id']} for user {decoded_token['uid']}")
+        print(f"Created Razorpay order {order['id']} for user {uid}")
 
         # --- 4. Return the necessary details to the Flutter app ---
         return (jsonify({"data": {
             "orderId": order['id'],
             "amount": order['amount'],
             "currency": order['currency'],
-            "razorpayKeyId": os.environ.get('RAZORPAY_KEY_ID') # Send the public key to the client
+            "razorpayKeyId": key_id
         }}), 200, headers)
 
     except Exception as e:

@@ -5,9 +5,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:scan_master/providers/user_data_provider.dart';
 import 'package:scan_master/screens/pdf_viewer_screen.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
-import 'package:intl/intl.dart'; // We'll use this for date formatting
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +23,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
   late Razorpay _razorpay;
 
+  Stream<QuerySnapshot>? _filesStream;
+
   @override
   void initState() {
     super.initState();
@@ -28,6 +32,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+
+    if (currentUser != null) {
+      _filesStream = FirebaseFirestore.instance
+          .collection('files')
+          .where('userId', isEqualTo: currentUser!.uid)
+          .orderBy('uploadTimestamp', descending: true)
+          .snapshots();
+    }
   }
 
   @override
@@ -37,13 +49,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    print('Razorpay Success Response: ${response.paymentId}');
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
-
     try {
       final data = {
         'order_id': response.orderId,
@@ -52,32 +63,39 @@ class _HomeScreenState extends State<HomeScreen> {
       };
       FirebaseFunctions functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       final HttpsCallable callable = functions.httpsCallable('verify-payment');
-      final HttpsCallableResult result = await callable.call(data);
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await callable.call(data);
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.data?['message'] ?? 'Subscription successfully activated!')),
+        const SnackBar(content: Text('Subscription successfully activated!')),
       );
-    } on FirebaseFunctionsException catch (e) {
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Backend Verification Error: ${e.message}')));
     } catch (e) {
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An unexpected error occurred during verification.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An error occurred during verification.')));
     }
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    print('ERROR: ${response.code} - ${response.message}');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Payment Failed: ${response.message}')),
-    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment Failed: ${response.message}')));
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
     print('EXTERNAL_WALLET: ${response.walletName}');
   }
+  
+  Future<void> _saveFileMetadata(String fileName, String storagePath, String userId) async {
+    await FirebaseFirestore.instance.collection('files').add({
+      'userId': userId,
+      'originalFileName': fileName,
+      'storagePath': storagePath,
+      'uploadTimestamp': FieldValue.serverTimestamp(),
+      'status': 'Uploaded',
+    });
+  }
 
-  // --- NEW FUNCTION TO SHOW LIMIT DIALOG ---
   void _showLimitReachedDialog() {
     showDialog(
       context: context,
@@ -85,126 +103,96 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Weekly Limit Reached'),
         content: const Text('You have reached your free weekly limit of 5 uploads. Please subscribe for unlimited uploads.'),
         actions: [
-          TextButton(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          ElevatedButton(
-            child: const Text('Subscribe'),
-            onPressed: () {
-              Navigator.of(context).pop();
-              _createSubscriptionOrder(context);
-            },
-          ),
+          TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(context).pop()),
+          ElevatedButton(child: const Text('Subscribe'), onPressed: () {
+            Navigator.of(context).pop();
+            _createSubscriptionOrder();
+          }),
         ],
       ),
     );
   }
 
-  // --- MODIFIED: This function now acts as a gatekeeper ---
   Future<void> _handleUploadAttempt() async {
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
     );
-
     try {
       FirebaseFunctions functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       final HttpsCallable callable = functions.httpsCallable('check-upload-allowance');
       final HttpsCallableResult result = await callable.call();
-
-      Navigator.of(context).pop(); // Close loading dialog
-
+      if (!mounted) return;
+      Navigator.of(context).pop();
       final bool isAllowed = result.data['allow'] ?? false;
       if (isAllowed) {
-        _startImagePickerAndUpload(); // Proceed with upload
+        _startImagePickerAndUpload();
       } else {
-        _showLimitReachedDialog(); // Show the limit reached popup
+        _showLimitReachedDialog();
       }
-    } on FirebaseFunctionsException catch (e) {
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     } catch (e) {
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An unexpected error occurred.')));
     }
   }
 
-  // --- NEW: Contains the original upload logic ---
   Future<void> _startImagePickerAndUpload() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-
     if (image == null || currentUser == null) return;
-
     final String userId = currentUser!.uid;
     final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${image.name}';
     final String path = 'uploads/$userId/$fileName';
     final Reference storageRef = FirebaseStorage.instance.ref().child(path);
-
     final uploadTask = storageRef.putFile(File(image.path));
-
-    setState(() {
-      _uploadTask = uploadTask;
-    });
-
+    setState(() { _uploadTask = uploadTask; });
     try {
       await uploadTask;
-      // We no longer need _saveFileMetadata, the backend handles this logic implicitly
+      await _saveFileMetadata(image.name, path, userId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload Complete!')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload Complete! Processing...')));
       }
     } on FirebaseException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload Failed: ${e.message}')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload Failed: ${e.message}')));
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _uploadTask = null;
-        });
-      }
+      if (mounted) { setState(() { _uploadTask = null; }); }
     }
   }
 
-  Future<void> _createSubscriptionOrder(BuildContext context) async {
+  Future<void> _createSubscriptionOrder() async {
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
-
     try {
       FirebaseFunctions functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       final HttpsCallable callable = functions.httpsCallable('create-subscription-order');
       final HttpsCallableResult result = await callable.call();
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (!mounted) return;
+      Navigator.of(context).pop();
       final orderData = Map<String, dynamic>.from(result.data);
       final options = {
-        'key': orderData['razorpayKeyId'],
-        'amount': orderData['amount'],
-        'name': 'Scan Master',
-        'order_id': orderData['orderId'],
-        'description': 'Premium Subscription',
-        'prefill': {'email': currentUser?.email ?? ''}
+        'key': orderData['razorpayKeyId'], 'amount': orderData['amount'],
+        'name': 'Scan Master', 'order_id': orderData['orderId'],
+        'description': 'Premium Subscription', 'prefill': {'email': currentUser?.email ?? ''}
       };
       _razorpay.open(options);
-    } on FirebaseFunctionsException catch (e) {
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     } catch (e) {
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('An unexpected error occurred.')));
     }
   }
 
   Future<void> _viewPdf(String documentId) async {
-    // This function remains the same
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -213,151 +201,137 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('get-download-url');
       final response = await callable.call<Map<String, dynamic>>({'documentId': documentId});
+      if (!mounted) return;
       Navigator.of(context).pop();
       final String url = response.data['url'];
       Navigator.of(context).push(MaterialPageRoute(builder: (context) => PdfViewerScreen(url: url)));
     } catch (e) {
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('An error occurred: $e')));
     }
   }
 
   Future<void> _deleteFile(String documentId) async {
-    // This function remains the same
     final bool confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Are you sure?'),
-        content: const Text('Do you want to permanently delete this file? This action cannot be undone.'),
+        content: const Text('Do you want to permanently delete this file?'),
         actions: <Widget>[
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           TextButton(style: TextButton.styleFrom(foregroundColor: Colors.red), onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
         ],
       ),
     ) ?? false;
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
     showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator()));
     try {
       HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('delete-file');
       await callable.call<Map<String, dynamic>>({'documentId': documentId});
+      if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File deleted successfully.')));
     } catch (e) {
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('An unexpected error occurred: $e')));
     }
   }
-
-  // --- MODIFIED WIDGET: This now wraps the UI in a StreamBuilder to get user status ---
+  
   @override
   Widget build(BuildContext context) {
-    if (currentUser == null) {
-      return const Scaffold(body: Center(child: Text('Not logged in.')));
-    }
-    return StreamBuilder<DocumentSnapshot>(
-      // Listen to the current user's document in the 'users' collection
-      stream: FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).snapshots(),
-      builder: (context, snapshot) {
-        final bool isSubscribed = snapshot.hasData && snapshot.data!.exists && (snapshot.data!.data() as Map<String, dynamic>)['isSubscribed'] == true;
-        Timestamp? endDate = (snapshot.hasData && snapshot.data!.exists) ? (snapshot.data!.data() as Map<String, dynamic>)['subscriptionEndDate'] : null;
+    // --- MODIFIED: Watch for changes in the UserDataProvider ---
+    final userData = context.watch<UserDataProvider>();
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('My Files'),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: 'Logout',
-                onPressed: () => FirebaseAuth.instance.signOut(),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Files'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => FirebaseAuth.instance.signOut(),
+          ),
+          // --- MODIFIED: UI is now built using the provider's state ---
+          if (userData.isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            )
+          else if (userData.isSubscribed)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12.0),
+              child: Chip(
+                label: Text('Premium User', style: TextStyle(color: Colors.white)),
+                backgroundColor: Colors.amber,
+                avatar: Icon(Icons.star, color: Colors.white),
               ),
-              // --- Conditionally render UI based on subscription status ---
-              if (isSubscribed)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                  child: Chip(
-                    label: const Text('Premium User', style: TextStyle(color: Colors.white)),
-                    backgroundColor: Colors.amber,
-                    avatar: const Icon(Icons.star, color: Colors.white),
-                  ),
-                )
-              else
-                TextButton(
-                  onPressed: () => _createSubscriptionOrder(context),
-                  style: TextButton.styleFrom(foregroundColor: Colors.white, backgroundColor: Colors.blue.shade600),
-                  child: const Text("Subscribe"),
+            )
+          else
+            TextButton(
+              onPressed: () => _createSubscriptionOrder(),
+              style: TextButton.styleFrom(foregroundColor: Colors.white, backgroundColor: Colors.blue.shade600),
+              child: const Text("Subscribe"),
+            ),
+          const SizedBox(width: 8),
+        ],
+        bottom: _uploadTask != null
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(4.0),
+                child: StreamBuilder<TaskSnapshot>(
+                  stream: _uploadTask!.snapshotEvents,
+                  builder: (context, snapshot) {
+                    final progress = snapshot.hasData ? snapshot.data!.bytesTransferred / snapshot.data!.totalBytes : null;
+                    return LinearProgressIndicator(value: progress);
+                  },
                 ),
-              const SizedBox(width: 8),
-            ],
-            bottom: _uploadTask != null
-                ? PreferredSize(
-                    preferredSize: const Size.fromHeight(4.0),
-                    child: StreamBuilder<TaskSnapshot>(
-                      stream: _uploadTask!.snapshotEvents,
-                      builder: (context, snapshot) {
-                        final progress = snapshot.hasData ? snapshot.data!.bytesTransferred / snapshot.data!.totalBytes : 0.0;
-                        return LinearProgressIndicator(value: progress);
-                      },
-                    ),
-                  )
-                : null,
-          ),
-          body: _buildFilesList(isSubscribed, endDate), // Pass status to the list builder
-          floatingActionButton: FloatingActionButton(
-            onPressed: _uploadTask != null ? null : _handleUploadAttempt,
-            tooltip: 'Upload Image',
-            child: _uploadTask != null
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-                : const Icon(Icons.add),
-          ),
-        );
-      },
+              )
+            : null,
+      ),
+      body: _buildFilesList(userData),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _uploadTask != null ? null : _handleUploadAttempt,
+        tooltip: 'Upload Image',
+        child: _uploadTask != null ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3)) : const Icon(Icons.add),
+      ),
     );
   }
 
-  // --- MODIFIED WIDGET: It now receives subscription status ---
-  Widget _buildFilesList(bool isSubscribed, Timestamp? endDate) {
+  Widget _buildFilesList(UserDataProvider userData) {
     return Column(
       children: [
-        if (isSubscribed && endDate != null)
+        if (userData.isSubscribed && userData.subscriptionEndDate != null)
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Text(
-              'Subscription active until: ${DateFormat.yMMMd().format(endDate.toDate())}',
+              'Subscription active until: ${DateFormat.yMMMd().format(userData.subscriptionEndDate!.toDate())}',
               style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold),
             ),
           ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('files')
-                .where('userId', isEqualTo: currentUser!.uid)
-                .orderBy('uploadTimestamp', descending: true)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+            stream: _filesStream,
+            builder: (context, filesSnapshot) {
+              if (filesSnapshot.connectionState == ConnectionState.waiting && !filesSnapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
-              if (snapshot.hasError) {
-                return Center(child: Text('DATABASE ERROR:\n\n${snapshot.error}'));
+              if (filesSnapshot.hasError) {
+                return Center(child: Text('DATABASE ERROR:\n\n${filesSnapshot.error}'));
               }
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              if (!filesSnapshot.hasData || filesSnapshot.data!.docs.isEmpty) {
                 return const Center(
-                  child: Text(
-                    'No files uploaded yet. Press + to begin.',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
+                  child: Text('No files uploaded yet. Press + to begin.', style: TextStyle(fontSize: 18, color: Colors.grey)),
                 );
               }
-
-              final files = snapshot.data!.docs;
+              final files = filesSnapshot.data!.docs;
               return ListView.builder(
                 itemCount: files.length,
                 itemBuilder: (context, index) {
                   final fileData = files[index].data() as Map<String, dynamic>;
-                  final String status = fileData['status'] ?? 'Unknown';
-                  final bool isCompleted = status == 'Completed';
-                  final String originalFileName = fileData['originalFileName'] ?? 'No filename';
-
+                  final status = fileData['status'] ?? 'Unknown';
+                  final isCompleted = status == 'Completed';
+                  final originalFileName = fileData['originalFileName'] ?? 'No filename';
                   String displayName;
                   if (isCompleted) {
                     final baseName = originalFileName.contains('.') ? originalFileName.substring(0, originalFileName.lastIndexOf('.')) : originalFileName;
@@ -365,7 +339,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     displayName = originalFileName;
                   }
-
                   return ListTile(
                     leading: Icon(isCompleted ? Icons.picture_as_pdf : Icons.image, color: isCompleted ? Colors.green : Colors.blue, size: 36),
                     title: Text(displayName, maxLines: 2, overflow: TextOverflow.ellipsis),

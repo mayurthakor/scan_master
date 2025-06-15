@@ -1,0 +1,7 @@
+google-cloud-firestore
+google-cloud-secret-manager
+firebase-admin
+firebase-functions
+functions-framework
+Flask
+razorpay

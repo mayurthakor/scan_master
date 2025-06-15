@@ -43,6 +43,8 @@ dependencies:
   url_launcher: ^6.3.1
   webview_flutter: ^4.13.0
   firebase_app_check: ^0.3.2+7
+  razorpay_flutter: ^1.4.0
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:

@@ -10,10 +10,11 @@ import time
 # Initialize Firebase Admin SDK
 firebase_admin.initialize_app()
 
-def access_secret_version(secret_id, project_id, version_id="latest"):
-    """Accesses a secret version."""
+def access_secret_version(secret_id, version_id="latest"):
+    """Accesses a secret version with a hardcoded project ID."""
     client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+    # HARDCODING the project ID to remove any ambiguity.
+    name = f"projects/scan-master-app/secrets/{secret_id}/versions/{version_id}"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data.decode("UTF-8")
 
@@ -38,11 +39,10 @@ def create_subscription_order(request):
         uid = decoded_token['uid']
 
         # --- 2. Get credentials ---
-        project_id = os.environ.get('GCP_PROJECT')
         key_id = os.environ.get('RAZORPAY_KEY_ID')
         
-        # We now directly use the known secret name
-        key_secret = access_secret_version('razorpay-key-secret', project_id)
+        # We now directly use the known secret name, project ID is hardcoded in the function
+        key_secret = access_secret_version('razorpay-key-secret')
         
         razorpay_client = razorpay.Client(auth=(key_id, key_secret))
 

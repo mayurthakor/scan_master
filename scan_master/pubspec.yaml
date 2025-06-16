@@ -44,6 +44,7 @@ dependencies:
   webview_flutter: ^4.13.0
   firebase_app_check: ^0.3.2+7
   razorpay_flutter: ^1.4.0
+  file_picker: ^8.0.6
   intl: ^0.20.2
   provider: ^6.1.5
 

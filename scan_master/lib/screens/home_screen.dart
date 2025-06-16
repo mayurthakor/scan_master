@@ -2,12 +2,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:scan_master/screens/pdf_viewer_screen.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -78,6 +80,26 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  IconData _getIconForFile(String fileName) {
+  final extension = fileName.split('.').last.toLowerCase();
+  switch (extension) {
+    case 'txt':
+      return Icons.text_snippet;
+    case 'docx':
+      return Icons.description;
+    case 'csv':
+    case 'xlsx':
+      return Icons.table_chart_rounded;
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+      return Icons.image;
+    default:
+      return Icons.insert_drive_file;
+  }
+}
+
+
   void _handlePaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -139,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.of(context).pop();
       final bool isAllowed = result.data['allow'] ?? false;
       if (isAllowed) {
-        _startImagePickerAndUpload();
+        _startFilePickerAndUpload();
       } else {
         _showLimitReachedDialog();
       }
@@ -151,32 +173,62 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _startImagePickerAndUpload() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    if (image == null) return;
+  // In lib/screens/home_screen.dart
+
+  // In lib/screens/home_screen.dart
+
+  Future<void> _startFilePickerAndUpload() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'txt', 'docx', 'csv', 'xlsx', 'pptx'],
+    );
+    if (result == null) return;
+
+    final PlatformFile pickedFile = result.files.first;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final String userId = user.uid;
-    final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${image.name}';
-    final String path = 'uploads/$userId/$fileName';
-    final Reference storageRef = FirebaseStorage.instance.ref().child(path);
-    final uploadTask = storageRef.putFile(File(image.path));
+    // Create a Firestore document reference FIRST to get a unique ID.
+    final DocumentReference docRef = FirebaseFirestore.instance.collection('files').doc();
+    
+    // Define the file's path and metadata.
+    final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${pickedFile.name}';
+    final String storagePath = 'uploads/${user.uid}/$fileName';
+    
+    // --- THIS IS THE CORRECTED PART ---
+    // We remove the 'contentType' line. Cloud Storage will auto-detect it.
+    final SettableMetadata metadata = SettableMetadata(
+      customMetadata: <String, String>{
+        'firestoreDocId': docRef.id,
+      },
+    );
+
+    // Start the upload, including the corrected metadata.
+    final Reference storageRef = FirebaseStorage.instance.ref().child(storagePath);
+    final fileToUpload = File(pickedFile.path!);
+    final uploadTask = storageRef.putFile(fileToUpload, metadata);
+
     setState(() {
       _uploadTask = uploadTask;
     });
+
     try {
+      // While the file uploads, create the Firestore document with the SAME ID.
+      await docRef.set({
+        'userId': user.uid,
+        'originalFileName': pickedFile.name,
+        'storagePath': storagePath,
+        'uploadTimestamp': FieldValue.serverTimestamp(),
+        'status': 'Uploaded',
+      });
+
       await uploadTask;
-      await _saveFileMetadata(image.name, path, userId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Upload Complete! Processing...')));
-      }
+
     } on FirebaseException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Upload Failed: ${e.message}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload Failed: ${e.message}')),
+        );
       }
     } finally {
       if (mounted) {
@@ -186,7 +238,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
   }
-
   Future<void> _createSubscriptionOrder() async {
     if (!mounted) return;
     showDialog(
@@ -406,13 +457,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         }
                         return ListTile(
                           leading: Icon(
-                              isCompleted ? Icons.picture_as_pdf : Icons.image,
-                              color: isCompleted ? Colors.green : Colors.blue,
-                              size: 36),
+                            isCompleted
+                                ? Icons.picture_as_pdf
+                                : _getIconForFile(originalFileName), // <-- CHANGE THIS LINE
+                            color: isCompleted ? Colors.green : Colors.blue,
+                            size: 36,
+                          ),
                           title: Text(displayName,
                               maxLines: 2, overflow: TextOverflow.ellipsis),
                           subtitle: Text('Status: $status'),
-                          onTap: isCompleted ? () => _viewPdf(files[index].id) : null,
+                          onTap: isCompleted && (fileData['pdfPath'] != null) ? () => _viewPdf(files[index].id) : null,
                           trailing: IconButton(
                             icon: const Icon(Icons.delete),
                             color: Theme.of(context).colorScheme.error,

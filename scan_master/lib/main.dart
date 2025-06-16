@@ -5,8 +5,7 @@ import 'firebase_options.dart';
 import 'package:scan_master/screens/home_screen.dart';
 import 'package:scan_master/screens/login_screen.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:provider/provider.dart';
-import 'package:scan_master/providers/user_data_provider.dart';
+// We no longer import or use the provider.
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +16,7 @@ Future<void> main() async {
     androidProvider: AndroidProvider.debug,
     appleProvider: AppleProvider.debug,
   );
+  // The App is no longer wrapped in a ChangeNotifierProvider
   runApp(const MyApp());
 }
 
@@ -25,18 +25,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Provide the UserData model to the entire app widget tree
-    return ChangeNotifierProvider(
-      create: (context) => UserDataProvider(),
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Scan Master',
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          visualDensity: VisualDensity.adaptivePlatformDensity,
-        ),
-        home: const AuthGate(),
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Scan Master',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
+      home: const AuthGate(),
     );
   }
 }
@@ -50,7 +46,8 @@ class AuthGate extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
           return const HomeScreen();

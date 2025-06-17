@@ -1,24 +1,21 @@
 # backend/conversion_service/Dockerfile
 
-# Use the official slim Python image as a more neutral base
+# Use a Debian-based image for compatibility with apt-get
 FROM python:3.11-slim
 
 # Set the working directory
-WORKDIR /srv
+WORKDIR /app
 
-# Install LibreOffice and clean up to reduce image size
-RUN apt-get update && apt-get install -y libreoffice --no-install-recommends \
+# Install system-level build tools AND LibreOffice
+RUN apt-get update && apt-get install -y build-essential gcc libreoffice --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
+# Copy requirements and install Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the function's source code
+# Copy the rest of the application code
 COPY . .
 
-# Set the PORT environment variable that the Functions Framework expects
-ENV PORT=8080
-
-# Set the entrypoint to run the Functions Framework for an event-driven function
-CMD ["functions-framework", "--target=process_file_to_pdf", "--signature-type=event"]
+# Set the startup command for the event-driven function
+CMD ["functions-framework", "--target=process_file_to_pdf", "--signature-type=cloudevent"]

@@ -47,6 +47,7 @@ dependencies:
   file_picker: ^8.0.6
   intl: ^0.20.2
   provider: ^6.1.5
+  share_plus: ^11.0.0
 
 dev_dependencies:
   flutter_test:

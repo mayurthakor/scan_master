@@ -1,19 +1,20 @@
+// lib/screens/home_screen.dart
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:scan_master/screens/pdf_viewer_screen.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:scan_master/screens/chat_screen.dart';
+import 'package:scan_master/services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -25,6 +26,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Stream<DocumentSnapshot?>? _userStream;
   Stream<QuerySnapshot>? _filesStream;
 
+  final ApiService _apiService = ApiService();
+  final Map<String, bool> _isPreparingChat = {};
+
   @override
   void initState() {
     super.initState();
@@ -35,7 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      _userStream = FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots();
+      _userStream =
+          FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots();
       _filesStream = FirebaseFirestore.instance
           .collection('files')
           .where('userId', isEqualTo: user.uid)
@@ -48,6 +53,104 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _razorpay.clear();
     super.dispose();
+  }
+
+  Future<void> _initiateChatPreparation(String documentId) async {
+    setState(() {
+      _isPreparingChat[documentId] = true;
+    });
+
+    await FirebaseFirestore.instance
+        .collection('files')
+        .doc(documentId)
+        .update({'chatStatus': 'preparing'});
+
+    _apiService.prepareChatSession(documentId).catchError((e) {
+      print("Error preparing chat in background: $e");
+      // The backend function will set the status to 'failed' on its own
+    }).whenComplete(() {
+      if (mounted) {
+        setState(() {
+          _isPreparingChat.remove(documentId);
+        });
+      }
+    });
+  }
+
+  Future<void> _navigateToChat(String documentId) async {
+     final doc = await FirebaseFirestore.instance.collection('files').doc(documentId).get();
+     final summary = doc.data()?['summary'] ?? "Summary not found.";
+
+     if (!mounted) return;
+     Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(
+            documentId: documentId,
+            initialSummary: summary,
+          ),
+        ),
+      );
+  }
+
+  Widget _buildTrailingWidget(Map<String, dynamic> fileData, String documentId) {
+    final status = fileData['status'] ?? 'Unknown';
+    if (status != 'Completed') {
+      return IconButton(
+        icon: const Icon(Icons.delete),
+        color: Theme.of(context).colorScheme.error,
+        onPressed: () => _deleteFile(documentId),
+      );
+    }
+    
+    final chatStatus = fileData['chatStatus'] as String?;
+    final isLocallyPreparing = _isPreparingChat[documentId] ?? false;
+
+    if (chatStatus == 'preparing' || isLocallyPreparing) {
+      return const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 8),
+          Text("Preparing...")
+        ],
+      );
+    }
+
+    if (chatStatus == 'failed') {
+      return IconButton(
+        icon: const Icon(Icons.error, color: Colors.red),
+        tooltip: 'Failed to prepare. Tap to retry.',
+        onPressed: () => _initiateChatPreparation(documentId),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chat_bubble_outline),
+          color: Colors.purple,
+          tooltip: 'Chat with AI',
+          onPressed: () {
+            final isChatReady = fileData['isChatReady'] ?? false;
+            if (isChatReady) {
+              _navigateToChat(documentId);
+            } else {
+              _initiateChatPreparation(documentId);
+            }
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.delete),
+          color: Theme.of(context).colorScheme.error,
+          onPressed: () => _deleteFile(documentId),
+        ),
+      ],
+    );
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
@@ -81,24 +184,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   IconData _getIconForFile(String fileName) {
-  final extension = fileName.split('.').last.toLowerCase();
-  switch (extension) {
-    case 'txt':
-      return Icons.text_snippet;
-    case 'docx':
-      return Icons.description;
-    case 'csv':
-    case 'xlsx':
-      return Icons.table_chart_rounded;
-    case 'jpg':
-    case 'jpeg':
-    case 'png':
-      return Icons.image;
-    default:
-      return Icons.insert_drive_file;
+    final extension = fileName.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'txt':
+        return Icons.text_snippet;
+      case 'docx':
+        return Icons.description;
+      case 'csv':
+      case 'xlsx':
+        return Icons.table_chart_rounded;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image;
+      default:
+        return Icons.insert_drive_file;
+    }
   }
-}
-
 
   void _handlePaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
@@ -108,17 +210,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleExternalWallet(ExternalWalletResponse response) {
     print('EXTERNAL_WALLET: ${response.walletName}');
-  }
-
-  Future<void> _saveFileMetadata(
-      String fileName, String storagePath, String userId) async {
-    await FirebaseFirestore.instance.collection('files').add({
-      'userId': userId,
-      'originalFileName': fileName,
-      'storagePath': storagePath,
-      'uploadTimestamp': FieldValue.serverTimestamp(),
-      'status': 'Uploaded',
-    });
   }
 
   void _showLimitReachedDialog() {
@@ -173,10 +264,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // In lib/screens/home_screen.dart
-
-  // In lib/screens/home_screen.dart
-
   Future<void> _startFilePickerAndUpload() async {
     final FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -188,22 +275,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Create a Firestore document reference FIRST to get a unique ID.
     final DocumentReference docRef = FirebaseFirestore.instance.collection('files').doc();
     
-    // Define the file's path and metadata.
     final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${pickedFile.name}';
     final String storagePath = 'uploads/${user.uid}/$fileName';
     
-    // --- THIS IS THE CORRECTED PART ---
-    // We remove the 'contentType' line. Cloud Storage will auto-detect it.
     final SettableMetadata metadata = SettableMetadata(
       customMetadata: <String, String>{
         'firestoreDocId': docRef.id,
       },
     );
 
-    // Start the upload, including the corrected metadata.
     final Reference storageRef = FirebaseStorage.instance.ref().child(storagePath);
     final fileToUpload = File(pickedFile.path!);
     final uploadTask = storageRef.putFile(fileToUpload, metadata);
@@ -213,7 +295,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // While the file uploads, create the Firestore document with the SAME ID.
       await docRef.set({
         'userId': user.uid,
         'originalFileName': pickedFile.name,
@@ -238,6 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
   }
+
   Future<void> _createSubscriptionOrder() async {
     if (!mounted) return;
     showDialog(
@@ -273,38 +355,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _viewPdf(String documentId) async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('get-download-url');
+      final response =
+          await callable.call<Map<String, dynamic>>({'documentId': documentId});
+      
       if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-      try {
-        HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-            .httpsCallable('get-download-url');
-        final response =
-            await callable.call<Map<String, dynamic>>({'documentId': documentId});
-        
-        if (!mounted) return;
-        Navigator.of(context).pop(); // Dismiss the loading dialog
+      Navigator.of(context).pop(); 
 
-        final String url = response.data['url'];
-        final Uri uri = Uri.parse(url);
+      final String url = response.data['url'];
+      final Uri uri = Uri.parse(url);
 
-        // This will now open the URL in the default native app (e.g., PDF Viewer, Browser)
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw 'Could not launch $url';
-        }
-
-      } catch (e) {
-        if (!mounted) return;
-        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('An error occurred: $e')));
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Could not launch $url';
       }
+
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('An error occurred: $e')));
     }
+  }
 
   Future<void> _deleteFile(String documentId) async {
     final bool confirmed = await showDialog<bool>(
@@ -347,11 +428,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // This is the new, clean architecture. A single StreamBuilder wraps the UI.
     return StreamBuilder<DocumentSnapshot?>(
       stream: _userStream,
       builder: (context, userSnapshot) {
-        // Handle the case where the stream is loading, which is important for new users.
         if (userSnapshot.connectionState == ConnectionState.waiting) {
           return Scaffold(
             appBar: AppBar(title: const Text("Loading...")),
@@ -359,7 +438,6 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        // Once loaded, determine the subscription state from this single source of truth.
         bool isSubscribed = false;
         Timestamp? subEndDate;
         if (userSnapshot.hasData && userSnapshot.data?.exists == true) {
@@ -370,7 +448,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Build the entire UI based on the definitive state.
         return Scaffold(
           appBar: AppBar(
             title: const Text('My Files'),
@@ -381,9 +458,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () => FirebaseAuth.instance.signOut(),
               ),
               if (isSubscribed)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12.0),
-                  child: Chip(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: const Chip(
                     label: Text('Premium User',
                         style: TextStyle(color: Colors.white)),
                     backgroundColor: Colors.amber,
@@ -449,7 +526,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     return ListView.builder(
                       itemCount: files.length,
                       itemBuilder: (context, index) {
-                        final fileData = files[index].data() as Map<String, dynamic>;
+                        final fileDoc = files[index];
+                        final fileData = fileDoc.data() as Map<String, dynamic>;
                         final status = fileData['status'] ?? 'Unknown';
                         final isCompleted = status == 'Completed';
                         final originalFileName =
@@ -464,24 +542,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         } else {
                           displayName = originalFileName;
                         }
+                        
                         return ListTile(
                           leading: Icon(
                             isCompleted
                                 ? Icons.picture_as_pdf
-                                : _getIconForFile(originalFileName), // <-- CHANGE THIS LINE
+                                : _getIconForFile(originalFileName),
                             color: isCompleted ? Colors.green : Colors.blue,
                             size: 36,
                           ),
                           title: Text(displayName,
                               maxLines: 2, overflow: TextOverflow.ellipsis),
                           subtitle: Text('Status: $status'),
-                          onTap: isCompleted && (fileData['pdfPath'] != null) ? () => _viewPdf(files[index].id) : null,
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete),
-                            color: Theme.of(context).colorScheme.error,
-                            tooltip: 'Delete File',
-                            onPressed: () => _deleteFile(files[index].id),
-                          ),
+                          onTap: isCompleted && (fileData['pdfPath'] != null) ? () => _viewPdf(fileDoc.id) : null,
+                          trailing: _buildTrailingWidget(fileData, fileDoc.id),
                         );
                       },
                     );

@@ -9,7 +9,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:scan_master/screens/pdf_viewer_screen.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -273,29 +273,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _viewPdf(String documentId) async {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-    try {
-      HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable('get-download-url');
-      final response =
-          await callable.call<Map<String, dynamic>>({'documentId': documentId});
       if (!mounted) return;
-      Navigator.of(context).pop();
-      final String url = response.data['url'];
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (context) => PdfViewerScreen(url: url)));
-    } catch (e) {
-      if (!mounted) return;
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('An error occurred: $e')));
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+      try {
+        HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+            .httpsCallable('get-download-url');
+        final response =
+            await callable.call<Map<String, dynamic>>({'documentId': documentId});
+        
+        if (!mounted) return;
+        Navigator.of(context).pop(); // Dismiss the loading dialog
+
+        final String url = response.data['url'];
+        final Uri uri = Uri.parse(url);
+
+        // This will now open the URL in the default native app (e.g., PDF Viewer, Browser)
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw 'Could not launch $url';
+        }
+
+      } catch (e) {
+        if (!mounted) return;
+        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('An error occurred: $e')));
+      }
     }
-  }
 
   Future<void> _deleteFile(String documentId) async {
     final bool confirmed = await showDialog<bool>(

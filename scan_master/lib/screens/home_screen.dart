@@ -10,7 +10,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:scan_master/screens/chat_screen.dart';
-import 'package:scan_master/services/api_service.dart';
+// REMOVED: import 'package:scan_master/services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Stream<DocumentSnapshot?>? _userStream;
   Stream<QuerySnapshot>? _filesStream;
 
-  final ApiService _apiService = ApiService();
+  // REMOVED: final ApiService _apiService = ApiService();
   final Map<String, bool> _isPreparingChat = {};
 
   @override
@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // --- MODIFIED FUNCTION ---
   Future<void> _initiateChatPreparation(String documentId) async {
     setState(() {
       _isPreparingChat[documentId] = true;
@@ -65,16 +66,28 @@ class _HomeScreenState extends State<HomeScreen> {
         .doc(documentId)
         .update({'chatStatus': 'preparing'});
 
-    _apiService.prepareChatSession(documentId).catchError((e) {
-      print("Error preparing chat in background: $e");
+    try {
+      // Direct call to Firebase Functions
+      print("Calling function to prepare chat in background...");
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('generate-doc-summary');
+      await callable.call<Map<String, dynamic>>({
+        'documentId': documentId,
+      });
+      // The backend function will update the status to 'ready' or 'failed' via its own logic.
+      // We don't need to handle the response here directly, as the stream will pick up the change.
+    } on FirebaseFunctionsException catch (e) {
+      print("Error preparing chat in background: ${e.message}");
       // The backend function will set the status to 'failed' on its own
-    }).whenComplete(() {
-      if (mounted) {
+    } catch (e) {
+      print("An unexpected error occurred: $e");
+    } finally {
+       if (mounted) {
         setState(() {
           _isPreparingChat.remove(documentId);
         });
       }
-    });
+    }
   }
 
   Future<void> _navigateToChat(String documentId) async {
@@ -458,9 +471,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () => FirebaseAuth.instance.signOut(),
               ),
               if (isSubscribed)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                  child: const Chip(
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Chip(
                     label: Text('Premium User',
                         style: TextStyle(color: Colors.white)),
                     backgroundColor: Colors.amber,

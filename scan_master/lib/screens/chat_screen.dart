@@ -2,7 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:scan_master/services/api_service.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+// REMOVED: import 'package:scan_master/services/api_service.dart';
 import 'package:share_plus/share_plus.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -20,7 +21,7 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final ApiService _apiService = ApiService();
+  // REMOVED: final ApiService _apiService = ApiService();
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _isLoading = false;
@@ -31,7 +32,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _addInitialSummaryToChat();
   }
 
-  // This function adds the summary as the first message if the chat is new.
   Future<void> _addInitialSummaryToChat() async {
     final chatMessagesRef = FirebaseFirestore.instance
         .collection('files')
@@ -50,6 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // --- MODIFIED FUNCTION ---
   void _sendMessage() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
@@ -65,27 +66,35 @@ class _ChatScreenState extends State<ChatScreen> {
         .doc(widget.documentId)
         .collection('chat_messages');
 
-    // Add user's message to Firestore
     await messagesRef.add({
       'text': text,
       'sender': 'user',
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // Scroll to the bottom
     _scrollToBottom();
 
     try {
-      // Get AI's response and add it to Firestore
-      final answer = await _apiService.askQuestion(widget.documentId, text);
+      // Direct call to Firebase Functions
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('chat-with-document');
+      final response = await callable.call<Map<String, dynamic>>({
+        'documentId': widget.documentId,
+        'question': text,
+      });
+      final answer = response.data['answer'] as String?;
+
+      if (answer == null) {
+        throw Exception('Failed to get answer from response.');
+      }
+
       await messagesRef.add({
         'text': answer,
         'sender': 'ai',
         'timestamp': FieldValue.serverTimestamp(),
-        'feedback': null, // Initialize feedback field
+        'feedback': null,
       });
     } catch (e) {
-      // If there's an error, add an error message to the chat
       await messagesRef.add({
         'text': "Sorry, I encountered an error. Please try again. ($e)",
         'sender': 'ai',
@@ -96,6 +105,20 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       _scrollToBottom();
+    }
+  }
+
+  // --- NEW FUNCTION ---
+  Future<void> _saveFeedback(String messageId, String feedback) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('files')
+          .doc(widget.documentId)
+          .collection('chat_messages')
+          .doc(messageId)
+          .update({'feedback': feedback});
+    } catch (e) {
+      print("Failed to save feedback: $e");
     }
   }
   
@@ -196,7 +219,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             child: Text(text, style: TextStyle(color: textColor)),
           ),
-          if (!isUserMessage) // Show actions only for AI messages
+          if (!isUserMessage)
             Padding(
               padding: const EdgeInsets.only(top: 4.0, left: 8.0),
               child: Row(
@@ -213,7 +236,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: feedback == 'liked' ? Colors.blue : null,
                     ),
                     onPressed: feedback != null ? null : () =>
-                      _apiService.saveFeedback(widget.documentId, messageId, 'liked'),
+                      _saveFeedback(messageId, 'liked'), // MODIFIED
                   ),
                   IconButton(
                     icon: Icon(
@@ -222,7 +245,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: feedback == 'disliked' ? Colors.red : null,
                     ),
                     onPressed: feedback != null ? null : () =>
-                      _apiService.saveFeedback(widget.documentId, messageId, 'disliked'),
+                      _saveFeedback(messageId, 'disliked'), // MODIFIED
                   ),
                 ],
               ),

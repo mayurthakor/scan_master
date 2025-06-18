@@ -44,7 +44,7 @@ dependencies:
   webview_flutter: ^4.13.0
   firebase_app_check: ^0.3.2+7
   razorpay_flutter: ^1.4.0
-  file_picker: ^8.0.6
+  file_picker: ^10.2.0
   intl: ^0.20.2
   provider: ^6.1.5
   share_plus: ^11.0.0
@@ -58,7 +58,7 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

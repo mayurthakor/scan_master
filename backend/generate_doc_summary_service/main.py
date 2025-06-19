@@ -1,110 +1,156 @@
+# backend/generate_doc_summary_service/main.py
 import os
 import functions_framework
 import firebase_admin
 from firebase_admin import firestore, auth
-from google.cloud import storage, secretmanager
+from google.cloud import storage
 import google.generativeai as genai
 from pypdf import PdfReader
 from io import BytesIO
 
-# --- Global initializations (Clients are safe to initialize here) ---
-firebase_admin.initialize_app()
-db = firestore.Client()
-storage_client = storage.Client()
-secrets_client = secretmanager.SecretManagerServiceClient()
-PROJECT_ID = os.environ.get('GCLOUD_PROJECT')
-
-# --- Helper function remains global ---
-def access_secret_version(secret_id, version_id="latest"):
-    if not PROJECT_ID: raise ValueError("GCLOUD_PROJECT env var not set.")
-    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
-    response = secrets_client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+# Only initialize Firebase Admin globally
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
 
 @functions_framework.http
 def generate_doc_summary(request):
-    # --- MOVED and UPDATED LOGIC ---
-    # Secret fetching and library configuration now happen inside the function.
-    # This is more robust and only runs when the function is invoked.
-    try:
-        api_key = access_secret_version("gemini-api-key")
-        genai.configure(api_key=api_key)
-    except Exception as e:
-        print(f"FATAL: Could not configure Gemini API. Error: {e}")
-        return ("Server configuration error.", 500)
-    # --- END OF MOVED LOGIC ---
-
     if request.method == 'OPTIONS':
-        headers = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization'}
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+        }
         return ('', 204, headers)
+    
     headers = {'Access-Control-Allow-Origin': '*'}
-
-    doc_id = ""
+    doc_id = None
+    
     try:
-        # 1. Securely verify the user is authenticated.
+        # Get request data
+        request_data = request.get_json()
+        if not request_data or 'data' not in request_data:
+            raise ValueError("Invalid request format")
+        
+        data = request_data['data']
+        doc_id = data.get('documentId')
+        if not doc_id:
+            raise ValueError("Missing documentId")
+        
+        print(f"Processing document: {doc_id}")
+        
+        # Manual authentication check
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
-            return ("Missing or invalid Authorization header.", 401)
+            return ({"error": {"message": "Unauthorized"}}, 401, headers)
         
         id_token = auth_header.split('Bearer ')[1]
-        try:
-            decoded_token = auth.verify_id_token(id_token)
-            user_uid = decoded_token['uid']
-        except Exception as e:
-            return (f"Invalid authentication token: {e}", 403)
-
-        # 2. Robustly parse the incoming JSON payload.
-        request_json = request.get_json(silent=True)
-        request_data = request_json.get('data') if request_json and 'data' in request_json else request_json
-
-        if not request_data or 'documentId' not in request_data:
-            raise ValueError("Request payload is invalid or missing 'documentId'")
+        decoded_token = auth.verify_id_token(id_token)
+        user_id = decoded_token['uid']
+        print(f"User authenticated: {user_id}")
         
-        doc_id = request_data['documentId']
+        # Initialize Firestore client
+        print("Initializing Firestore...")
+        db = firestore.Client()
+        
+        # Check document
+        print("Checking document...")
         file_doc_ref = db.collection('files').document(doc_id)
         file_doc = file_doc_ref.get()
-
+        
         if not file_doc.exists:
-            raise FileNotFoundError(f"File document {doc_id} not found.")
+            raise FileNotFoundError(f"File document {doc_id} not found")
         
         file_data = file_doc.to_dict()
-
-        # 3. Enforce ownership.
-        if file_data.get('userId') != user_uid:
-            return ("Permission denied: User does not own this file.", 403)
-
-        # 4. Proceed with core logic.
+        
+        # Verify ownership
+        if file_data.get('userId') != user_id:
+            return ({"error": {"message": "Forbidden"}}, 403, headers)
+        
+        # Return existing summary if available
         if file_data.get('isChatReady') is True:
-            return ({"data": {"summary": file_data.get('summary', 'Summary not found.')}}, 200, headers)
-
+            existing_summary = file_data.get('summary', 'Summary not found.')
+            print(f"Returning existing summary for {doc_id}")
+            return ({"data": {"summary": existing_summary}}, 200, headers)
+        
+        # Get PDF path
         pdf_path = file_data.get('pdfPath')
-        if not pdf_path: raise ValueError("PDF path not found.")
+        if not pdf_path:
+            raise ValueError("PDF path not found in document")
         
-        bucket_name = os.environ.get('GCS_BUCKET')
-        if not bucket_name: raise ValueError("GCS_BUCKET env var not set.")
+        print(f"Processing PDF: {pdf_path}")
         
+        # Initialize Storage client
+        print("Initializing Storage...")
+        storage_client = storage.Client()
+        bucket_name = os.environ.get('GCS_BUCKET', 'scan-master-app.firebasestorage.app')
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(pdf_path)
-        pdf_content = blob.download_as_bytes()
         
+        # Download PDF
+        print("Downloading PDF...")
+        pdf_content = blob.download_as_bytes()
         reader = PdfReader(BytesIO(pdf_content))
-        full_text = "".join(page.extract_text() + "\n" for page in reader.pages if page.extract_text())
+        
+        # Extract text
+        print("Extracting text...")
+        full_text = ""
+        for page in reader.pages:
+            full_text += page.extract_text() + "\n"
         
         if not full_text.strip():
             summary = "No text could be extracted from this document."
-        else:
-            model = genai.GenerativeModel('gemini-1.5-pro-latest')
-            prompt = f"Provide a concise, one-paragraph summary of the following document:\n\n{full_text}"
-            response = model.generate_content(prompt)
-            summary = response.text
+            print(f"No text extracted from {doc_id}")
+            
+            db.collection('document_content').document(doc_id).set({'full_text': ''})
+            file_doc_ref.update({
+                'summary': summary,
+                'isChatReady': True,
+                'chatStatus': 'ready'
+            })
+            return ({"data": {"summary": summary}}, 200, headers)
         
+        print(f"Extracted {len(full_text)} characters of text")
+        
+        # Get Gemini API key from environment variable (no Secret Manager)
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable not set")
+        
+        # Configure Gemini
+        print("Configuring Gemini...")
+        genai.configure(api_key=api_key)
+        
+        # Generate summary
+        print("Generating summary...")
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        prompt = f"Provide a concise, one-paragraph summary of the following document:\n\n{full_text[:4000]}"
+        
+        gemini_response = model.generate_content(prompt)
+        summary = gemini_response.text
+        
+        print(f"Generated summary: {len(summary)} characters")
+        
+        # Save results
+        print("Saving results...")
         db.collection('document_content').document(doc_id).set({'full_text': full_text})
-        file_doc_ref.update({'summary': summary, 'isChatReady': True, 'chatStatus': 'ready' })
+        file_doc_ref.update({
+            'summary': summary,
+            'isChatReady': True,
+            'chatStatus': 'ready'
+        })
         
+        print(f"Successfully processed document {doc_id}")
         return ({"data": {"summary": summary}}, 200, headers)
         
     except Exception as e:
-        print(f"ERROR processing document {doc_id}: {e}")
+        error_msg = str(e)
+        print(f"ERROR processing document {doc_id if doc_id else 'unknown'}: {error_msg}")
+        
         if doc_id:
-            db.collection('files').document(doc_id).update({'chatStatus': 'failed'})
-        return ({"error": {"message": str(e)}}, 500, headers)
+            try:
+                db = firestore.Client()
+                db.collection('files').document(doc_id).update({'chatStatus': 'failed'})
+            except Exception as update_error:
+                print(f"Failed to update document status: {update_error}")
+        
+        return ({"error": {"message": error_msg}}, 500, headers)

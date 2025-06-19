@@ -10,7 +10,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:scan_master/screens/chat_screen.dart';
-// REMOVED: import 'package:scan_master/services/api_service.dart';
+import 'package:scan_master/services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Stream<DocumentSnapshot?>? _userStream;
   Stream<QuerySnapshot>? _filesStream;
 
-  // REMOVED: final ApiService _apiService = ApiService();
+  final ApiService _apiService = ApiService();
   final Map<String, bool> _isPreparingChat = {};
 
   @override
@@ -55,34 +55,58 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // --- MODIFIED FUNCTION ---
   Future<void> _initiateChatPreparation(String documentId) async {
     setState(() {
       _isPreparingChat[documentId] = true;
     });
 
+    // Update status to preparing
     await FirebaseFirestore.instance
         .collection('files')
         .doc(documentId)
         .update({'chatStatus': 'preparing'});
 
     try {
-      // Direct call to Firebase Functions
-      print("Calling function to prepare chat in background...");
-      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable('generate-doc-summary');
-      await callable.call<Map<String, dynamic>>({
-        'documentId': documentId,
-      });
-      // The backend function will update the status to 'ready' or 'failed' via its own logic.
-      // We don't need to handle the response here directly, as the stream will pick up the change.
-    } on FirebaseFunctionsException catch (e) {
-      print("Error preparing chat in background: ${e.message}");
-      // The backend function will set the status to 'failed' on its own
+      // Call the API service to prepare chat
+      final summary = await _apiService.prepareChatSession(documentId);
+      
+      // Show success message to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Document is ready for chat!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      print("Chat preparation successful. Summary length: ${summary.length} characters");
+      
     } catch (e) {
-      print("An unexpected error occurred: $e");
+      print("Error preparing chat: $e");
+      
+      // Update status to failed
+      try {
+        await FirebaseFirestore.instance
+            .collection('files')
+            .doc(documentId)
+            .update({'chatStatus': 'failed'});
+      } catch (updateError) {
+        print("Failed to update document status: $updateError");
+      }
+      
+      // Show error message to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to prepare document for chat: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+          
     } finally {
-       if (mounted) {
+      if (mounted) {
         setState(() {
           _isPreparingChat.remove(documentId);
         });
@@ -91,18 +115,40 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _navigateToChat(String documentId) async {
-     final doc = await FirebaseFirestore.instance.collection('files').doc(documentId).get();
-     final summary = doc.data()?['summary'] ?? "Summary not found.";
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('files')
+          .doc(documentId)
+          .get();
+      
+      if (!doc.exists) {
+        throw Exception('Document not found');
+      }
+      
+      final data = doc.data()!;
+      final summary = data['summary'] ?? "Summary not found.";
+      final fileName = data['originalFileName'] ?? "Unknown file";
 
-     if (!mounted) return;
-     Navigator.of(context).push(
+      if (!mounted) return;
+      
+      Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => ChatScreen(
             documentId: documentId,
+            fileName: fileName,
             initialSummary: summary,
           ),
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open chat: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Widget _buildTrailingWidget(Map<String, dynamic> fileData, String documentId) {
@@ -117,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
     
     final chatStatus = fileData['chatStatus'] as String?;
     final isLocallyPreparing = _isPreparingChat[documentId] ?? false;
+    final isChatReady = fileData['isChatReady'] ?? false;
 
     if (chatStatus == 'preparing' || isLocallyPreparing) {
       return const Row(
@@ -145,11 +192,12 @@ class _HomeScreenState extends State<HomeScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          icon: const Icon(Icons.chat_bubble_outline),
-          color: Colors.purple,
-          tooltip: 'Chat with AI',
+          icon: Icon(
+            Icons.chat_bubble_outline,
+            color: isChatReady ? Colors.green : Colors.purple,
+          ),
+          tooltip: isChatReady ? 'Chat with AI' : 'Prepare for chat',
           onPressed: () {
-            final isChatReady = fileData['isChatReady'] ?? false;
             if (isChatReady) {
               _navigateToChat(documentId);
             } else {

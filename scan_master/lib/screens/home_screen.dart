@@ -12,6 +12,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:scan_master/screens/chat_screen.dart';
 import 'package:scan_master/services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:scan_master/screens/document_scanner_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -293,6 +294,187 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _openDocumentScanner() async {
+    try {
+      final result = await Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (context) => DocumentScannerScreen(),
+        ),
+      );
+
+      if (result != null) {
+        if (result == 'use_gallery') {
+          // User chose to use gallery instead
+          _handleUploadAttempt();
+        } else {
+          // User scanned a document, now upload it
+          await _uploadScannedDocument(result);
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Scanner not available: $e'),
+          action: SnackBarAction(
+            label: 'Use Files',
+            onPressed: _handleUploadAttempt,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _uploadScannedDocument(String imagePath) async {
+    if (!mounted) return;
+    
+    // Check upload allowance first
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    
+    try {
+      FirebaseFunctions functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+      final HttpsCallable callable = functions.httpsCallable('check-upload-allowance');
+      final HttpsCallableResult result = await callable.call();
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      final bool isAllowed = result.data['allow'] ?? false;
+      if (!isAllowed) {
+        _showLimitReachedDialog();
+        return;
+      }
+      
+      // Proceed with upload
+      await _performScannedDocumentUpload(imagePath);
+      
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload check failed: $e')),
+      );
+    }
+  }
+
+Future<void> _performScannedDocumentUpload(String imagePath) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final DocumentReference docRef = FirebaseFirestore.instance.collection('files').doc();
+    
+    // Generate filename
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final fileName = 'scanned_document_$timestamp.jpg';
+    final String storagePath = 'uploads/${user.uid}/$fileName';
+    
+    final SettableMetadata metadata = SettableMetadata(
+      customMetadata: <String, String>{
+        'firestoreDocId': docRef.id,
+      },
+    );
+
+    try {
+      final Reference storageRef = FirebaseStorage.instance.ref().child(storagePath);
+      final fileToUpload = File(imagePath);
+      final uploadTask = storageRef.putFile(fileToUpload, metadata);
+
+      setState(() {
+        _uploadTask = uploadTask;
+      });
+
+      // Create Firestore document
+      await docRef.set({
+        'userId': user.uid,
+        'originalFileName': fileName,
+        'storagePath': storagePath,
+        'uploadTimestamp': FieldValue.serverTimestamp(),
+        'status': 'Uploaded',
+        'isScanned': true, // Mark as scanned document
+      });
+
+      await uploadTask;
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Document scanned and uploaded successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload Failed: $e')),
+        );
+      }
+    } finally {
+      // Clean up temp file
+      try {
+        await File(imagePath).delete();
+      } catch (e) {
+        print('Could not delete temp file: $e');
+      }
+      
+      if (mounted) {
+        setState(() {
+          _uploadTask = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _showUploadOptions() async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Add Document',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            SizedBox(height: 20),
+            
+            // Scanner option
+            ListTile(
+              leading: Icon(Icons.camera_alt, color: Colors.blue),
+              title: Text('Scan with Camera'),
+              subtitle: Text('Use your camera to scan documents'),
+              onTap: () => Navigator.of(context).pop('camera'),
+            ),
+            
+            // File picker option
+            ListTile(
+              leading: Icon(Icons.folder, color: Colors.green),
+              title: Text('Choose from Files'),
+              subtitle: Text('Select from gallery or files'),
+              onTap: () => Navigator.of(context).pop('files'),
+            ),
+            
+            SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+
+    if (result == 'camera') {
+      _openDocumentScanner();
+    } else if (result == 'files') {
+      _handleUploadAttempt();
+    }
   }
 
   Future<void> _handleUploadAttempt() async {
@@ -626,8 +808,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           floatingActionButton: FloatingActionButton(
-            onPressed: _uploadTask != null ? null : _handleUploadAttempt,
-            tooltip: 'Upload Image',
+            onPressed: _uploadTask != null ? null : _showUploadOptions,
+            tooltip: 'Add Document',
             child: _uploadTask != null
                 ? const SizedBox(
                     width: 20,

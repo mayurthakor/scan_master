@@ -81,15 +81,91 @@ jobs:
           --cpu=2 \
           --timeout=600 \
           --clear-base-image
+    # Step 6: Deploy check-upload-allowance service
+    - name: Deploy check-upload-allowance
+      run: |
+        cd backend/check_upload_allowance_service
+        gcloud functions deploy check-upload-allowance \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=check_upload_allowance \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 7: Deploy delete-file service
+    - name: Deploy delete-file
+      run: |
+        cd backend/delete_file_service
+        gcloud functions deploy delete-file \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=delete_file \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 8: Deploy get-download-url service
+    - name: Deploy get-download-url
+      run: |
+        cd backend/get_download_url_service
+        gcloud functions deploy get-download-url \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=get_download_url \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 9: Deploy subscription service (with Razorpay key)
+    - name: Deploy subscription-service
+      run: |
+        cd backend/subscription_service
+        gcloud functions deploy create-subscription-order \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=create_subscription_order \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 10: Deploy verify-payment service (with Razorpay key)
+    - name: Deploy verify-payment
+      run: |
+        cd backend/verify_payment_service
+        gcloud functions deploy verify-payment \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=verify_payment \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
+          --memory=256MB \
+          --timeout=60s
     
-    # Step 6: Send notification
+    # Step 11: Send notification
     - name: Send success notification
       if: success()
       run: |
         echo "✅ All backend services deployed successfully!"
         echo "📧 Notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"
     
-    # Step 7: Send failure notification
+    # Step 12: Send failure notification
     - name: Send failure notification
       if: failure()
       run: |

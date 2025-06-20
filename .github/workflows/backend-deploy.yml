@@ -30,6 +30,13 @@ jobs:
         project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
         export_default_credentials: true
     
+    # Step 2b: Authenticate
+    - name: Authenticate with Google Cloud
+      run: |
+        echo '${{ secrets.GCLOUD_SA_KEY }}' | base64 -d > /tmp/gcloud-key.json
+        gcloud auth activate-service-account --key-file /tmp/gcloud-key.json
+        gcloud config set project ${{ secrets.GCLOUD_PROJECT_ID }}
+    
     # Step 3: Deploy generate-doc-summary service
     - name: Deploy generate-doc-summary
       run: |

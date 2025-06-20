@@ -79,7 +79,7 @@ jobs:
           --allow-unauthenticated \
           --memory=2Gi \
           --cpu=2 \
-          --timeout=600
+          --timeout=600 \
           --clear-base-image
     
     # Step 6: Send notification

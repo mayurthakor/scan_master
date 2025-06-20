@@ -4,10 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+// import 'package:permission_handler/permission_handler.dart';
 import 'package:image/image.dart' as img;
-import 'package:scan_master/services/edge_detection_service.dart';
-import 'package:scan_master/screens/document_preview_screen.dart';
+// import 'package:scan_master/services/edge_detection_service.dart';
+// import 'package:scan_master/screens/document_preview_screen.dart';
 
 class DocumentScannerScreen extends StatefulWidget {
   const DocumentScannerScreen({super.key});

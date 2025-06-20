@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'package:scan_master/screens/home_screen.dart';
+import 'package:scan_master/screens/updated_home_screen.dart';
 import 'package:scan_master/screens/login_screen.dart';
-// REMOVED: import 'package:firebase_app_check/firebase_app_check.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,7 +43,7 @@ class AuthGate extends StatelessWidget {
               body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
-          return const HomeScreen();
+          return const UpdatedHomeScreen();
         }
         return const LoginScreen();
       },

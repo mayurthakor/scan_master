@@ -1,6 +1,7 @@
 // lib/services/enhanced_camera_service.dart
 import 'dart:io';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,10 +10,19 @@ import 'package:path/path.dart' as path;
 import 'enhanced_edge_detection_service.dart';
 import 'batch_scanning_service.dart';
 
+// Enum declaration at top level (outside class)
+enum AutoCapturePhase {
+  detecting,
+  notificationShown,
+  countingDown,
+  capturing,
+  completed
+}
 
 class EnhancedCameraService {
   static EnhancedCameraService? _instance;
-  static EnhancedCameraService get instance => _instance ??= EnhancedCameraService._();
+  static EnhancedCameraService get instance => 
+      _instance ??= EnhancedCameraService._();
   
   EnhancedCameraService._();
 
@@ -23,8 +33,16 @@ class EnhancedCameraService {
   // Auto-capture functionality
   Timer? _detectionTimer;
   bool _isAutoDetecting = false;
+  bool _isCaptureInProgress = false;
   EdgeDetectionResult? _lastDetectionResult;
   final EnhancedEdgeDetectionService _edgeDetectionService = EnhancedEdgeDetectionService();
+
+  // New auto-capture phase tracking
+  AutoCapturePhase _autoCapturePhase = AutoCapturePhase.detecting;
+  Timer? _countdownTimer;
+  double _countdownSeconds = 2.0;
+  List<Offset> _lastStableCorners = [];
+  DateTime? _lastMovementTime;
 
   List<CameraDescription>? get cameras => _cameras;
   CameraController? get controller => _controller;
@@ -72,7 +90,7 @@ class EnhancedCameraService {
     }
   }
 
-  /// Start auto-detection for documents
+  /// Start auto-detection for documents with new phase-based approach
   void startAutoDetection({
     AutoCaptureSettings? settings,
     required Function(EdgeDetectionResult) onDetectionUpdate,
@@ -81,41 +99,39 @@ class EnhancedCameraService {
     if (!_isInitialized || _isAutoDetecting) return;
 
     _isAutoDetecting = true;
+    _autoCapturePhase = AutoCapturePhase.detecting;
+    _lastMovementTime = DateTime.now();
+    
     _edgeDetectionService.updateAutoCaptureSettings(
       settings ?? const AutoCaptureSettings(),
     );
 
+    // Lightweight detection every 500ms (no takePicture during detection)
     _detectionTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
       if (!_isInitialized || !_isAutoDetecting) {
         timer.cancel();
         return;
       }
 
+      if (_isCaptureInProgress) {
+        print('Skipping detection - capture in progress');
+        return;
+      }
+
       try {
-        // Capture frame for analysis
-        final tempImagePath = await _captureFrameForAnalysis();
-        if (tempImagePath == null) return;
+        // Generate mock detection result (lightweight, no camera calls)
+        final mockResult = _generateMockDetectionResult();
+        
+        _lastDetectionResult = mockResult;
+        onDetectionUpdate(mockResult);
 
-        // Detect document edges
-        final result = await _edgeDetectionService.detectDocumentEdges(
-          imagePath: tempImagePath,
-          imageSize: Size(
-            _controller!.value.previewSize?.height ?? 1920,
-            _controller!.value.previewSize?.width ?? 1080,
-          ),
-          autoCaptureSettings: settings,
-        );
-
-        _lastDetectionResult = result;
-        onDetectionUpdate(result);
-
-        // Check for auto-capture
-        if (result.isReadyForAutoCapture) {
-          await _performAutoCapture(onAutoCapture);
+        // Check if we found good edges and should start notification phase
+        if (_autoCapturePhase == AutoCapturePhase.detecting && 
+            mockResult.corners.length == 4 && 
+            mockResult.confidence > 0.8) {
+          _startNotificationPhase(onAutoCapture);
         }
-
-        // Cleanup temp file
-        await File(tempImagePath).delete();
+        
       } catch (e) {
         print('Auto-detection error: $e');
       }
@@ -125,37 +141,14 @@ class EnhancedCameraService {
   /// Stop auto-detection
   void stopAutoDetection() {
     _isAutoDetecting = false;
+    _isCaptureInProgress = false;
+    _autoCapturePhase = AutoCapturePhase.detecting;
+    _countdownSeconds = 0.4;
     _detectionTimer?.cancel();
+    _countdownTimer?.cancel();
     _detectionTimer = null;
+    _countdownTimer = null;
     _edgeDetectionService.resetAutoCaptureTracking();
-  }
-
-  /// Capture frame for analysis (lower quality for performance)
-  Future<String?> _captureFrameForAnalysis() async {
-    if (!_isInitialized) return null;
-
-    try {
-      final XFile image = await _controller!.takePicture();
-      return image.path;
-    } catch (e) {
-      print('Frame capture error: $e');
-      return null;
-    }
-  }
-
-  /// Perform auto-capture when conditions are met
-  Future<void> _performAutoCapture(Function(String) onAutoCapture) async {
-    try {
-      stopAutoDetection(); // Stop detection during capture
-      
-      await HapticFeedback.mediumImpact();
-      await Future.delayed(const Duration(milliseconds: 100)); // Brief pause
-      
-      final imagePath = await captureImage();
-      onAutoCapture(imagePath);
-    } catch (e) {
-      print('Auto-capture failed: $e');
-    }
   }
 
   /// Switch between front and back camera
@@ -278,6 +271,12 @@ class EnhancedCameraService {
   /// Get auto-capture status
   AutoCaptureStatus get autoCaptureStatus => _edgeDetectionService.getAutoCaptureStatus();
 
+  /// Get current auto-capture phase
+  AutoCapturePhase get currentPhase => _autoCapturePhase;
+
+  /// Get countdown seconds
+  double get countdownSeconds => _countdownSeconds;
+
   /// Dispose camera controller
   Future<void> disposeController() async {
     stopAutoDetection();
@@ -308,6 +307,143 @@ class EnhancedCameraService {
     } catch (e) {
       print('Cleanup error: $e');
       // Don't throw - cleanup is not critical
+    }
+  }
+
+  // PRIVATE METHODS FOR AUTO-CAPTURE FLOW
+
+  /// Generate mock detection result (replace with real lightweight detection later)
+  EdgeDetectionResult _generateMockDetectionResult() {
+    // Simulate finding corners after some time
+    final now = DateTime.now();
+    final timeSinceStart = now.difference(_lastMovementTime ?? now).inSeconds;
+    
+    if (timeSinceStart > 3) { // Simulate finding corners after 3 seconds
+      final corners = [
+        const Offset(100, 100),
+        const Offset(300, 120),
+        const Offset(280, 400),
+        const Offset(80, 380),
+      ];
+      
+      _lastStableCorners = corners;
+      
+      return EdgeDetectionResult(
+        corners: corners,
+        confidence: 0.85,
+        method: 'mock',
+        requiresManualAdjustment: false,
+        documentType: DocumentType.a4Document,
+        isReadyForAutoCapture: true,
+        positioningFeedback: _getPhaseMessage(),
+      );
+    }
+    
+    return EdgeDetectionResult(
+      corners: [],
+      confidence: 0.3,
+      method: 'mock',
+      requiresManualAdjustment: true,
+      documentType: DocumentType.unknown,
+      isReadyForAutoCapture: false,
+      positioningFeedback: 'Position document in frame',
+    );
+  }
+
+  /// Get message based on current phase
+  String _getPhaseMessage() {
+    switch (_autoCapturePhase) {
+      case AutoCapturePhase.detecting:
+        return 'Position document in frame';
+      case AutoCapturePhase.notificationShown:
+        return 'Document detected! Hold steady for auto-capture';
+      case AutoCapturePhase.countingDown:
+        return 'Hold steady: ${_countdownSeconds.toStringAsFixed(1)}s';
+      case AutoCapturePhase.capturing:
+        return 'Capturing...';
+      case AutoCapturePhase.completed:
+        return 'Photo captured!';
+    }
+  }
+
+  /// Start notification phase
+  void _startNotificationPhase(Function(String) onAutoCapture) {
+    _autoCapturePhase = AutoCapturePhase.notificationShown;
+    _lastMovementTime = DateTime.now();
+    
+    // After showing notification for a brief moment, start countdown
+    Timer(const Duration(milliseconds: 500), () {
+      if (_autoCapturePhase == AutoCapturePhase.notificationShown) {
+        _startCountdown(onAutoCapture);
+      }
+    });
+  }
+
+  /// Start 0.8-second countdown with milliseconds
+  void _startCountdown(Function(String) onAutoCapture) {
+    _autoCapturePhase = AutoCapturePhase.countingDown;
+    _countdownSeconds = 0.4;
+    
+    _countdownTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      _countdownSeconds -= 0.1;
+      
+      // Check for movement during countdown
+      if (_hasMovementDetected()) {
+        _cancelCountdown();
+        return;
+      }
+      
+      if (_countdownSeconds <= 0) {
+        timer.cancel();
+        _executeAutoCapture(onAutoCapture);
+      }
+    });
+  }
+
+  /// Check if significant movement detected
+  bool _hasMovementDetected() {
+    // Check if corners have moved significantly since last stable position
+    if (_lastDetectionResult?.corners.length != 4 || _lastStableCorners.length != 4) {
+      return true;
+    }
+    
+    for (int i = 0; i < 4; i++) {
+      final distance = (_lastDetectionResult!.corners[i] - _lastStableCorners[i]).distance;
+      if (distance > 20.0) { // 20 pixel movement threshold
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Cancel countdown due to movement
+  void _cancelCountdown() {
+    _countdownTimer?.cancel();
+    _autoCapturePhase = AutoCapturePhase.detecting;
+    _countdownSeconds = 0.4;
+    print('Auto-capture cancelled - movement detected');
+  }
+
+  /// Execute the actual auto-capture
+  Future<void> _executeAutoCapture(Function(String) onAutoCapture) async {
+    _autoCapturePhase = AutoCapturePhase.capturing;
+    
+    try {
+      // Flash/haptic before capture
+      await HapticFeedback.heavyImpact();
+      
+      // Take actual photo
+      final imagePath = await captureImage();
+      
+      _autoCapturePhase = AutoCapturePhase.completed;
+      onAutoCapture(imagePath);
+      
+      // Auto-stop detection after successful capture
+      stopAutoDetection();
+      
+    } catch (e) {
+      print('Auto-capture execution failed: $e');
+      _autoCapturePhase = AutoCapturePhase.detecting;
     }
   }
 }
@@ -649,6 +785,8 @@ class _EnhancedCameraScreenState extends State<EnhancedCameraScreen>
         detectionResult: _currentDetection,
         isAutoDetecting: _autoDetectionEnabled,
         autoCaptureStatus: _cameraService.autoCaptureStatus,
+        currentPhase: _cameraService.currentPhase,
+        countdownSeconds: _cameraService.countdownSeconds,
       ),
     );
   }
@@ -745,12 +883,17 @@ class _EnhancedCameraScreenState extends State<EnhancedCameraScreen>
   Color _getDetectionColor() {
     if (_currentDetection == null) return Colors.grey;
     
-    if (_currentDetection!.confidence > 0.8) {
-      return Colors.green;
-    } else if (_currentDetection!.confidence > 0.6) {
-      return Colors.orange;
-    } else {
-      return Colors.red;
+    switch (_cameraService.currentPhase) {
+      case AutoCapturePhase.detecting:
+        return Colors.blue;
+      case AutoCapturePhase.notificationShown:
+        return Colors.orange;
+      case AutoCapturePhase.countingDown:
+        return Colors.green;
+      case AutoCapturePhase.capturing:
+        return Colors.purple;
+      case AutoCapturePhase.completed:
+        return Colors.green;
     }
   }
 
@@ -818,13 +961,20 @@ class _EnhancedCameraScreenState extends State<EnhancedCameraScreen>
   }
 
   Color _getCaptureButtonColor() {
-    if (_autoDetectionEnabled && _currentDetection?.isReadyForAutoCapture == true) {
-      return Colors.green;
-    } else if (_autoDetectionEnabled) {
-      return Colors.orange;
-    } else {
-      return Colors.white;
+    if (_autoDetectionEnabled) {
+      switch (_cameraService.currentPhase) {
+        case AutoCapturePhase.detecting:
+          return Colors.orange;
+        case AutoCapturePhase.notificationShown:
+        case AutoCapturePhase.countingDown:
+          return Colors.green;
+        case AutoCapturePhase.capturing:
+          return Colors.purple;
+        case AutoCapturePhase.completed:
+          return Colors.green;
+      }
     }
+    return Colors.white;
   }
 
   Widget _buildFeedbackOverlay() {
@@ -852,6 +1002,11 @@ class _EnhancedCameraScreenState extends State<EnhancedCameraScreen>
               Text(
                 'Type: ${_getDocumentTypeName(_currentDetection!.documentType)}',
                 style: const TextStyle(color: Colors.white70, fontSize: 10),
+              ),
+            if (_cameraService.currentPhase == AutoCapturePhase.countingDown)
+              Text(
+                'Countdown: ${_cameraService.countdownSeconds.toStringAsFixed(1)}s',
+                style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold),
               ),
           ],
         ),
@@ -927,11 +1082,15 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
   final EdgeDetectionResult? detectionResult;
   final bool isAutoDetecting;
   final AutoCaptureStatus autoCaptureStatus;
+  final AutoCapturePhase currentPhase;
+  final double countdownSeconds;
 
   EnhancedDocumentOverlayPainter({
     this.detectionResult,
     required this.isAutoDetecting,
     required this.autoCaptureStatus,
+    required this.currentPhase,
+    required this.countdownSeconds,
   });
 
   @override
@@ -945,6 +1104,11 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
     if (isAutoDetecting) {
       _drawAutoDetectionIndicator(canvas, size);
     }
+
+    // Draw countdown timer if in countdown phase
+    if (currentPhase == AutoCapturePhase.countingDown) {
+      _drawCountdownTimer(canvas, size);
+    }
   }
 
   void _drawDetectedDocument(Canvas canvas, Size size) {
@@ -957,9 +1121,9 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
       corner.dy * size.height / 1080,
     )).toList();
     
-    // Draw document boundary
+    // Draw document boundary with phase-based color
     final paint = Paint()
-      ..color = _getConfidenceColor(confidence)
+      ..color = _getPhaseColor()
       ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke;
 
@@ -974,9 +1138,9 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
     
     canvas.drawPath(path, paint);
     
-    // Draw corner indicators
+    // Draw corner indicators (dots)
     for (int i = 0; i < scaledCorners.length; i++) {
-      _drawCornerIndicator(canvas, scaledCorners[i], i + 1, confidence);
+      _drawCornerDot(canvas, scaledCorners[i], i + 1);
     }
   }
 
@@ -989,7 +1153,7 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
     // Draw document frame guide
     final frameRect = _calculateFrameRect(size);
     
-    // Draw corner indicators
+    // Draw corner guides
     _drawCornerGuides(canvas, frameRect, paint);
     
     // Draw center guidelines
@@ -999,7 +1163,7 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
   void _drawAutoDetectionIndicator(Canvas canvas, Size size) {
     // Draw auto-detection status indicator
     final indicatorPaint = Paint()
-      ..color = _getAutoDetectionColor()
+      ..color = _getPhaseColor()
       ..style = PaintingStyle.fill;
     
     const indicatorSize = 12.0;
@@ -1007,43 +1171,87 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
     
     canvas.drawCircle(indicatorCenter, indicatorSize, indicatorPaint);
     
-    // Pulsing effect for active detection
-    if (autoCaptureStatus == AutoCaptureStatus.stabilizing ||
-        autoCaptureStatus == AutoCaptureStatus.ready) {
+    // Pulsing effect for active phases
+    if (currentPhase == AutoCapturePhase.countingDown ||
+        currentPhase == AutoCapturePhase.notificationShown) {
       final pulsePaint = Paint()
-        ..color = _getAutoDetectionColor().withOpacity(0.3)
+        ..color = _getPhaseColor().withOpacity(0.3)
         ..style = PaintingStyle.fill;
       
       canvas.drawCircle(indicatorCenter, indicatorSize * 1.5, pulsePaint);
     }
   }
 
-  Color _getConfidenceColor(double confidence) {
-    if (confidence > 0.8) return Colors.green;
-    if (confidence > 0.6) return Colors.orange;
-    return Colors.red;
+  void _drawCountdownTimer(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    const radius = 80.0;
+    
+    // Draw countdown circle background
+    final backgroundPaint = Paint()
+      ..color = Colors.black54
+      ..style = PaintingStyle.fill;
+    
+    canvas.drawCircle(center, radius, backgroundPaint);
+    
+    // Draw countdown progress arc
+    final progressPaint = Paint()
+      ..color = Colors.green
+      ..strokeWidth = 8.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    
+    final progress = (0.4 - countdownSeconds) / 0.4;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 20),
+      -math.pi / 2,
+      2 * math.pi * progress,
+      false,
+      progressPaint,
+    );
+    
+    // Draw countdown text
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: countdownSeconds.toStringAsFixed(1),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    );
+    
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset(
+        center.dx - textPainter.width / 2,
+        center.dy - textPainter.height / 2,
+      ),
+    );
   }
 
-  Color _getAutoDetectionColor() {
-    switch (autoCaptureStatus) {
-      case AutoCaptureStatus.ready:
-        return Colors.green;
-      case AutoCaptureStatus.stabilizing:
-        return Colors.orange;
-      case AutoCaptureStatus.lowConfidence:
-        return Colors.red;
-      case AutoCaptureStatus.searching:
+  Color _getPhaseColor() {
+    switch (currentPhase) {
+      case AutoCapturePhase.detecting:
         return Colors.blue;
-      case AutoCaptureStatus.disabled:
-      default:
-        return Colors.grey;
+      case AutoCapturePhase.notificationShown:
+        return Colors.orange;
+      case AutoCapturePhase.countingDown:
+        return Colors.green;
+      case AutoCapturePhase.capturing:
+        return Colors.purple;
+      case AutoCapturePhase.completed:
+        return Colors.green;
     }
   }
 
-  void _drawCornerIndicator(Canvas canvas, Offset corner, int number, double confidence) {
-    // Draw corner circle
+  void _drawCornerDot(Canvas canvas, Offset corner, int number) {
+    // Draw corner dot
     final cornerPaint = Paint()
-      ..color = _getConfidenceColor(confidence)
+      ..color = _getPhaseColor()
       ..style = PaintingStyle.fill;
     
     canvas.drawCircle(corner, 8, cornerPaint);
@@ -1199,7 +1407,9 @@ class EnhancedDocumentOverlayPainter extends CustomPainter {
   bool shouldRepaint(EnhancedDocumentOverlayPainter oldDelegate) {
     return oldDelegate.detectionResult != detectionResult ||
            oldDelegate.isAutoDetecting != isAutoDetecting ||
-           oldDelegate.autoCaptureStatus != autoCaptureStatus;
+           oldDelegate.autoCaptureStatus != autoCaptureStatus ||
+           oldDelegate.currentPhase != currentPhase ||
+           oldDelegate.countdownSeconds != countdownSeconds;
   }
 }
 

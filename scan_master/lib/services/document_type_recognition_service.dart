@@ -1171,6 +1171,12 @@ class OptimizationSettings {
   final bool preserveColors;
   final bool ocrOptimization;
   final double compressionLevel;
+  final bool autoRotate;
+  final bool reduceNoise;
+  final bool finalSharpen;
+  final double backgroundThreshold;
+  final double noiseReductionStrength;
+  final double sharpenStrength;
 
   OptimizationSettings({
     required this.enhanceContrast,
@@ -1180,6 +1186,12 @@ class OptimizationSettings {
     required this.preserveColors,
     required this.ocrOptimization,
     required this.compressionLevel,
+    this.autoRotate = true,
+    this.reduceNoise = true,
+    this.finalSharpen = true,
+    this.backgroundThreshold = 0.12,
+    this.noiseReductionStrength = 0.3,
+    this.sharpenStrength = 0.7,
   });
 
   factory OptimizationSettings.defaultSettings() {
@@ -1187,10 +1199,16 @@ class OptimizationSettings {
       enhanceContrast: true,
       sharpenText: true,
       adjustBrightness: true,
-      removeBackground: false,
+      removeBackground: true,
       preserveColors: false,
       ocrOptimization: true,
-      compressionLevel: 0.8,
+      compressionLevel: 0.85,
+      autoRotate: true,
+      reduceNoise: true,
+      finalSharpen: true,
+      backgroundThreshold: 0.12,
+      noiseReductionStrength: 0.3,
+      sharpenStrength: 0.7,
     );
   }
 }

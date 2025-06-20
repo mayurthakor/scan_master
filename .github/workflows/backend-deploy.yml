@@ -56,7 +56,7 @@ jobs:
     # Step 4: Deploy chat-with-document service
     - name: Deploy chat-with-document
       run: |
-        cd backend/chat_with_document_service
+        cd backend/chat_service
         gcloud functions deploy chat-with-document \
           --gen2 \
           --runtime=python311 \

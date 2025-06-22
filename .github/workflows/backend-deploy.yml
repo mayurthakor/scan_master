@@ -111,22 +111,7 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Step 8: Deploy get-download-url service
-    - name: Deploy get-download-url
-      run: |
-        cd backend/get_download_url_service
-        gcloud functions deploy get-download-url \
-          --gen2 \
-          --runtime=python311 \
-          --region=us-central1 \
-          --source=. \
-          --entry-point=get_download_url \
-          --trigger-http \
-          --allow-unauthenticated \
-          --memory=256MB \
-          --timeout=60s
-
-    # Step 9: Deploy subscription service (with Razorpay key)
+    # Step 8: Deploy subscription service (with Razorpay key)
     - name: Deploy subscription-service
       run: |
         cd backend/subscription_service
@@ -142,7 +127,7 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Step 10: Deploy verify-payment service (with Razorpay key)
+    # Step 9: Deploy verify-payment service (with Razorpay key)
     - name: Deploy verify-payment
       run: |
         cd backend/verify_payment_service
@@ -158,14 +143,14 @@ jobs:
           --memory=256MB \
           --timeout=60s
     
-    # Step 11: Send notification
+    # Step 10: Send notification
     - name: Send success notification
       if: success()
       run: |
         echo "✅ All backend services deployed successfully!"
         echo "📧 Notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"
     
-    # Step 12: Send failure notification
+    # Step 11: Send failure notification
     - name: Send failure notification
       if: failure()
       run: |

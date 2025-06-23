@@ -104,4 +104,8 @@ ANSWER:"""
         
     except Exception as e:
         print(f"ERROR in chat: {e}")
-        return ({"error": {"message": str(e)}}, 500, headers)
+        return ({"error": {"message": str(e)}}, 500, headers)# Test change for environment variables
+# Testing fixed conditionals
+# Debug enhanced conditionals
+# Testing clean matrix without secrets 14
+# Testing fixed workflow final

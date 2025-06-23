@@ -1,4 +1,4 @@
-name: Deploy Backend Services
+name: Deploy Backend Services (Smart)
 
 # When this workflow runs
 on:
@@ -13,16 +13,58 @@ env:
   GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
 
 jobs:
-  deploy-backend:
-    name: Deploy Backend Services
+  detect-changes:
+    name: Detect Changed Services
     runs-on: ubuntu-latest
+    outputs:
+      generate-doc-summary: ${{ steps.changes.outputs.generate-doc-summary }}
+      chat-service: ${{ steps.changes.outputs.chat-service }}
+      conversion-service: ${{ steps.changes.outputs.conversion-service }}
+      check-upload-allowance: ${{ steps.changes.outputs.check-upload-allowance }}
+      delete-file: ${{ steps.changes.outputs.delete-file }}
+      get-download-url: ${{ steps.changes.outputs.get-download-url }}
+      subscription-service: ${{ steps.changes.outputs.subscription-service }}
+      verify-payment: ${{ steps.changes.outputs.verify-payment }}
     
     steps:
-    # Step 1: Get the code
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for change detection
+    
+    - name: Detect changes
+      uses: dorny/paths-filter@v2
+      id: changes
+      with:
+        filters: |
+          generate-doc-summary:
+            - 'backend/generate_doc_summary_service/**'
+          chat-service:
+            - 'backend/chat_service/**'
+          conversion-service:
+            - 'backend/conversion_service/**'
+          check-upload-allowance:
+            - 'backend/check_upload_allowance_service/**'
+          delete-file:
+            - 'backend/delete_file_service/**'
+          get-download-url:
+            - 'backend/get_download_url_service/**'
+          subscription-service:
+            - 'backend/subscription_service/**'
+          verify-payment:
+            - 'backend/verify_payment_service/**'
+
+  deploy-services:
+    name: Deploy Changed Services
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' || needs.detect-changes.outputs.chat-service == 'true' || needs.detect-changes.outputs.conversion-service == 'true' || needs.detect-changes.outputs.check-upload-allowance == 'true' || needs.detect-changes.outputs.delete-file == 'true' || needs.detect-changes.outputs.get-download-url == 'true' || needs.detect-changes.outputs.subscription-service == 'true' || needs.detect-changes.outputs.verify-payment == 'true' }}
+    
+    steps:
+    # Setup steps
     - name: Checkout code
       uses: actions/checkout@v4
     
-    # Step 2: Setup Google Cloud
     - name: Setup Google Cloud CLI
       uses: google-github-actions/setup-gcloud@v2
       with:
@@ -30,16 +72,17 @@ jobs:
         project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
         export_default_credentials: true
     
-    # Step 2b: Authenticate
     - name: Authenticate with Google Cloud
       run: |
         echo '${{ secrets.GCLOUD_SA_KEY }}' | base64 -d > /tmp/gcloud-key.json
         gcloud auth activate-service-account --key-file /tmp/gcloud-key.json
         gcloud config set project ${{ secrets.GCLOUD_PROJECT_ID }}
     
-    # Step 3: Deploy generate-doc-summary service
+    # Conditional deployments
     - name: Deploy generate-doc-summary
+      if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' }}
       run: |
+        echo "🚀 Deploying generate-doc-summary service..."
         cd backend/generate_doc_summary_service
         gcloud functions deploy generate-doc-summary \
           --gen2 \
@@ -52,10 +95,11 @@ jobs:
           --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
           --memory=512MB \
           --timeout=540s
-    
-    # Step 4: Deploy chat-with-document service
-    - name: Deploy chat-with-document
+
+    - name: Deploy chat-service
+      if: ${{ needs.detect-changes.outputs.chat-service == 'true' }}
       run: |
+        echo "🚀 Deploying chat service..."
         cd backend/chat_service
         gcloud functions deploy chat-with-document \
           --gen2 \
@@ -68,10 +112,11 @@ jobs:
           --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
           --memory=512MB \
           --timeout=540s
-    
-    # Step 5: Deploy conversion service (Cloud Run)
-    - name: Deploy conversion service
+
+    - name: Deploy conversion-service
+      if: ${{ needs.detect-changes.outputs.conversion-service == 'true' }}
       run: |
+        echo "🚀 Deploying conversion service..."
         cd backend/conversion_service
         gcloud run deploy process-file-to-pdf \
           --source=. \
@@ -81,9 +126,11 @@ jobs:
           --cpu=2 \
           --timeout=600 \
           --clear-base-image
-    # Step 6: Deploy check-upload-allowance service
+
     - name: Deploy check-upload-allowance
+      if: ${{ needs.detect-changes.outputs.check-upload-allowance == 'true' }}
       run: |
+        echo "🚀 Deploying check-upload-allowance service..."
         cd backend/check_upload_allowance_service
         gcloud functions deploy check-upload-allowance \
           --gen2 \
@@ -96,9 +143,10 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Step 7: Deploy delete-file service
     - name: Deploy delete-file
+      if: ${{ needs.detect-changes.outputs.delete-file == 'true' }}
       run: |
+        echo "🚀 Deploying delete-file service..."
         cd backend/delete_file_service
         gcloud functions deploy delete-file \
           --gen2 \
@@ -111,9 +159,27 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Step 8: Deploy subscription service (with Razorpay key)
-    - name: Deploy subscription-service
+    - name: Deploy get-download-url
+      if: ${{ needs.detect-changes.outputs.get-download-url == 'true' }}
       run: |
+        echo "🚀 Deploying get-download-url service..."
+        cd backend/get_download_url_service
+        gcloud functions deploy get-download-url \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=get_download_url \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+          --memory=256MB \
+          --timeout=60s
+
+    - name: Deploy subscription-service
+      if: ${{ needs.detect-changes.outputs.subscription-service == 'true' }}
+      run: |
+        echo "🚀 Deploying subscription service..."
         cd backend/subscription_service
         gcloud functions deploy create-subscription-order \
           --gen2 \
@@ -127,9 +193,10 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Step 9: Deploy verify-payment service (with Razorpay key)
     - name: Deploy verify-payment
+      if: ${{ needs.detect-changes.outputs.verify-payment == 'true' }}
       run: |
+        echo "🚀 Deploying verify-payment service..."
         cd backend/verify_payment_service
         gcloud functions deploy verify-payment \
           --gen2 \
@@ -142,32 +209,17 @@ jobs:
           --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
           --memory=256MB \
           --timeout=60s
-    # Step 11: Deploy get-download-url service
-    - name: Deploy get-download-url
+
+    # Summary
+    - name: Deployment Summary
       run: |
-        cd backend/get_download_url_service
-        gcloud functions deploy get-download-url \
-          --gen2 \
-          --runtime=python311 \
-          --region=us-central1 \
-          --source=. \
-          --entry-point=get_download_url \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
-          --memory=256MB \
-          --timeout=60s
-    
-    # Step 10: Send notification
-    - name: Send success notification
-      if: success()
-      run: |
-        echo "✅ All backend services deployed successfully!"
-        echo "📧 Notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"
-    
-    # Step 11: Send failure notification
-    - name: Send failure notification
-      if: failure()
-      run: |
-        echo "❌ Backend deployment failed!"
-        echo "📧 Failure notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"
+        echo "✅ Deployment completed!"
+        echo "📊 Services deployed:"
+        echo "  - generate-doc-summary: ${{ needs.detect-changes.outputs.generate-doc-summary }}"
+        echo "  - chat-service: ${{ needs.detect-changes.outputs.chat-service }}"
+        echo "  - conversion-service: ${{ needs.detect-changes.outputs.conversion-service }}"
+        echo "  - check-upload-allowance: ${{ needs.detect-changes.outputs.check-upload-allowance }}"
+        echo "  - delete-file: ${{ needs.detect-changes.outputs.delete-file }}"
+        echo "  - get-download-url: ${{ needs.detect-changes.outputs.get-download-url }}"
+        echo "  - subscription-service: ${{ needs.detect-changes.outputs.subscription-service }}"
+        echo "  - verify-payment: ${{ needs.detect-changes.outputs.verify-payment }}"

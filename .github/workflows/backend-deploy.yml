@@ -1,0 +1,158 @@
+name: Deploy Backend Services
+
+# When this workflow runs
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'backend/**' ]  # Only run when backend files change
+  workflow_dispatch:  # Allow manual trigger
+
+# Environment variables
+env:
+  PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}
+  GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend Services
+    runs-on: ubuntu-latest
+    
+    steps:
+    # Step 1: Get the code
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Step 2: Setup Google Cloud
+    - name: Setup Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        service_account_key: ${{ secrets.GCLOUD_SA_KEY }}
+        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
+        export_default_credentials: true
+    
+    # Step 2b: Authenticate
+    - name: Authenticate with Google Cloud
+      run: |
+        echo '${{ secrets.GCLOUD_SA_KEY }}' | base64 -d > /tmp/gcloud-key.json
+        gcloud auth activate-service-account --key-file /tmp/gcloud-key.json
+        gcloud config set project ${{ secrets.GCLOUD_PROJECT_ID }}
+    
+    # Step 3: Deploy generate-doc-summary service
+    - name: Deploy generate-doc-summary
+      run: |
+        cd backend/generate_doc_summary_service
+        gcloud functions deploy generate-doc-summary \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=generate_doc_summary \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+          --memory=512MB \
+          --timeout=540s
+    
+    # Step 4: Deploy chat-with-document service
+    - name: Deploy chat-with-document
+      run: |
+        cd backend/chat_service
+        gcloud functions deploy chat-with-document \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=chat_with_document \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+          --memory=512MB \
+          --timeout=540s
+    
+    # Step 5: Deploy conversion service (Cloud Run)
+    - name: Deploy conversion service
+      run: |
+        cd backend/conversion_service
+        gcloud run deploy process-file-to-pdf \
+          --source=. \
+          --region=us-central1 \
+          --allow-unauthenticated \
+          --memory=2Gi \
+          --cpu=2 \
+          --timeout=600 \
+          --clear-base-image
+    # Step 6: Deploy check-upload-allowance service
+    - name: Deploy check-upload-allowance
+      run: |
+        cd backend/check_upload_allowance_service
+        gcloud functions deploy check-upload-allowance \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=check_upload_allowance \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 7: Deploy delete-file service
+    - name: Deploy delete-file
+      run: |
+        cd backend/delete_file_service
+        gcloud functions deploy delete-file \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=delete_file \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 8: Deploy subscription service (with Razorpay key)
+    - name: Deploy subscription-service
+      run: |
+        cd backend/subscription_service
+        gcloud functions deploy create-subscription-order \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=create_subscription_order \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
+          --memory=256MB \
+          --timeout=60s
+
+    # Step 9: Deploy verify-payment service (with Razorpay key)
+    - name: Deploy verify-payment
+      run: |
+        cd backend/verify_payment_service
+        gcloud functions deploy verify-payment \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=verify_payment \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
+          --memory=256MB \
+          --timeout=60s
+    
+    # Step 10: Send notification
+    - name: Send success notification
+      if: success()
+      run: |
+        echo "✅ All backend services deployed successfully!"
+        echo "📧 Notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"
+    
+    # Step 11: Send failure notification
+    - name: Send failure notification
+      if: failure()
+      run: |
+        echo "❌ Backend deployment failed!"
+        echo "📧 Failure notification would be sent to ${{ secrets.NOTIFICATION_EMAIL }}"

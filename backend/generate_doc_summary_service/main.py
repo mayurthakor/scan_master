@@ -155,3 +155,4 @@ def generate_doc_summary(request):
                 print(f"Failed to update document status: {update_error}")
         
         return ({"error": {"message": error_msg}}, 500, headers)
+#test commit.

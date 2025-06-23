@@ -98,8 +98,5 @@ def prepare_chat_session(request):
         print(f"ERROR processing document {doc_id}: {e}")
         if doc_id:
             db.collection('files').document(doc_id).update({'chatStatus': 'failed'})
-        return ({"error": {"message": str(e)}}, 500, headers)# Test change for environment variables
-# Testing fixed conditionals
-# Debug enhanced conditionals
-# Testing clean matrix without secrets 14
-# Testing fixed workflow final
+        return ({"error": {"message": str(e)}}, 500, headers)
+    #test commit.

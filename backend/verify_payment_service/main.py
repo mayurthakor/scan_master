@@ -84,3 +84,4 @@ def verify_payment(request):
         error_message = f"Backend Error: {type(e).__name__} - {str(e)}"
         print(f"!!! RETURNING ERROR TO CLIENT: {error_message}")
         return (jsonify({"error": {"status": "INTERNAL", "message": error_message}}), 500, headers)
+    #test commit.

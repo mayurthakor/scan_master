@@ -13,7 +13,7 @@ firebase_admin.initialize_app()
 def access_secret_version(secret_id, version_id="latest"):
     """Accesses a secret version with a hardcoded project ID."""
     client = secretmanager.SecretManagerServiceClient()
-    # HARDCODING the project ID to remove any ambiguity.
+    # HARDCODING the project ID to remove any ambiguity. 
     name = f"projects/scan-master-app/secrets/{secret_id}/versions/{version_id}"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data.decode("UTF-8")

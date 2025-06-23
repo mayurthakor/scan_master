@@ -1,4 +1,4 @@
-# backend/chat_service/main.py 
+# backend/chat_service/main.py  
 import os
 import functions_framework
 import firebase_admin
@@ -23,7 +23,7 @@ def chat_with_document(request):
     headers = {'Access-Control-Allow-Origin': '*'}
     
     try:
-        # Manual authentication check (NO App Check)
+        # Manual authentication check  (NO App Check)
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return ({"error": {"message": "Unauthorized"}}, 401, headers)

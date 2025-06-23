@@ -32,8 +32,8 @@ def prepare_chat_session(request):
 
     doc_id = ""
     try:
-        # Step 1: Securely verify the user is authenticated and owns the document.
-        auth_header = request.headers.get('Authorization')
+        # Step 1: Securely verify the user is authenticated and owns the document. 
+        auth_header = request.headers.get('Authorization') 
         if not auth_header or not auth_header.startswith('Bearer '):
             return ("Missing or invalid Authorization header.", 401)
         

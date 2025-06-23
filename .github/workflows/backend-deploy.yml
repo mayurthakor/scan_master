@@ -80,12 +80,15 @@ jobs:
     - name: Deploy generate-doc-summary
       if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' }}
       run: |
-        echo "🚀 Deploying generate-doc-summary service..."
+        echo "🚀 Deploying generate-doc-summary service to multiple regions..."
         cd backend/generate_doc_summary_service
+        
+        # Deploy to US Central (Primary)
+        echo "Deploying to us-central1..."
         gcloud functions deploy generate-doc-summary \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ env.PRIMARY_REGION }} \
           --source=. \
           --entry-point=generate_doc_summary \
           --trigger-http \
@@ -93,18 +96,15 @@ jobs:
           --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
           --memory=512MB \
           --timeout=540s
-
-    - name: Deploy chat-service
-      if: ${{ needs.detect-changes.outputs.chat-service == 'true' }}
-      run: |
-        echo "🚀 Deploying chat service..."
-        cd backend/chat_service
-        gcloud functions deploy chat-with-document \
+        
+        # Deploy to Asia South (Secondary)
+        echo "Deploying to asia-south1..."
+        gcloud functions deploy generate-doc-summary \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ env.SECONDARY_REGION }} \
           --source=. \
-          --entry-point=chat_with_document \
+          --entry-point=generate_doc_summary \
           --trigger-http \
           --allow-unauthenticated \
           --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \

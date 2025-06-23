@@ -7,15 +7,9 @@ from flask import jsonify
 import firebase_admin
 from firebase_admin import auth
 
-# --- THIS IS THE NEW, EXPLICIT CREDENTIALS SETUP ---
-KEY_FILE_PATH = 'service-account-key.json'
-
-# Explicitly load credentials from the bundled JSON key file.
-# These credentials contain the private key needed for signing.
-signing_credentials = service_account.Credentials.from_service_account_file(KEY_FILE_PATH)
-
-# Initialize the storage client with these specific signing credentials.
-storage_client = storage.Client(credentials=signing_credentials)
+# --- USE ENVIRONMENT CREDENTIALS FOR CI/CD ---
+# Use default credentials provided by the environment (GitHub Actions)
+storage_client = storage.Client()
 
 # Firestore and Auth can still use the default environment credentials.
 firebase_admin.initialize_app()
@@ -24,7 +18,7 @@ db = firestore.Client()
 
 
 @functions_framework.http
-def get_signed_url(request):
+def get_download_url(request):
     """
     Final version using explicit service account key for signing URLs.
     """

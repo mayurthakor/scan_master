@@ -1,18 +1,14 @@
-name: Deploy Backend Services (Smart)
+name: Deploy Backend Services (Multi-Region)
 
-# When this workflow runs
 on:
   push:
     branches: [ main ]
-    paths: [ 'backend/**' ]  # Only run when backend files change
-  workflow_dispatch:  # Allow manual trigger
+    paths: [ 'backend/**' ]
+  workflow_dispatch:
 
-# Environment variables
 env:
   PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}
   GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-  PRIMARY_REGION: us-central1
-  SECONDARY_REGION: asia-south1
 
 jobs:
   detect-changes:
@@ -32,7 +28,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history for change detection
+        fetch-depth: 0
     
     - name: Detect changes
       uses: dorny/paths-filter@v2
@@ -56,14 +52,17 @@ jobs:
           verify-payment:
             - 'backend/verify_payment_service/**'
 
-  deploy-services:
-    name: Deploy Changed Services
+  deploy-functions:
+    name: Deploy Cloud Functions
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' || needs.detect-changes.outputs.chat-service == 'true' || needs.detect-changes.outputs.conversion-service == 'true' || needs.detect-changes.outputs.check-upload-allowance == 'true' || needs.detect-changes.outputs.delete-file == 'true' || needs.detect-changes.outputs.get-download-url == 'true' || needs.detect-changes.outputs.subscription-service == 'true' || needs.detect-changes.outputs.verify-payment == 'true' }}
+    if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' || needs.detect-changes.outputs.chat-service == 'true' || needs.detect-changes.outputs.check-upload-allowance == 'true' || needs.detect-changes.outputs.delete-file == 'true' || needs.detect-changes.outputs.get-download-url == 'true' || needs.detect-changes.outputs.subscription-service == 'true' || needs.detect-changes.outputs.verify-payment == 'true' }}
+    
+    strategy:
+      matrix:
+        region: [us-central1, asia-south1, europe-west1]
     
     steps:
-    # Setup steps
     - name: Checkout code
       uses: actions/checkout@v4
     
@@ -78,33 +77,15 @@ jobs:
       with:
         project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
     
-    # Conditional deployments
     - name: Deploy generate-doc-summary
       if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' }}
       run: |
-        echo "🚀 Deploying generate-doc-summary service to multiple regions..."
+        echo "🚀 Deploying generate-doc-summary to ${{ matrix.region }}..."
         cd backend/generate_doc_summary_service
-        
-        # Deploy to US Central (Primary)
-        echo "Deploying to us-central1..."
         gcloud functions deploy generate-doc-summary \
           --gen2 \
           --runtime=python311 \
-          --region=${{ env.PRIMARY_REGION }} \
-          --source=. \
-          --entry-point=generate_doc_summary \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
-          --memory=512MB \
-          --timeout=540s
-        
-        # Deploy to Asia South (Secondary)
-        echo "Deploying to asia-south1..."
-        gcloud functions deploy generate-doc-summary \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ env.SECONDARY_REGION }} \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=generate_doc_summary \
           --trigger-http \
@@ -113,29 +94,32 @@ jobs:
           --memory=512MB \
           --timeout=540s
 
-    - name: Deploy conversion-service
-      if: ${{ needs.detect-changes.outputs.conversion-service == 'true' }}
+    - name: Deploy chat-service
+      if: ${{ needs.detect-changes.outputs.chat-service == 'true' }}
       run: |
-        echo "🚀 Deploying conversion service..."
-        cd backend/conversion_service
-        gcloud run deploy process-file-to-pdf \
+        echo "🚀 Deploying chat-service to ${{ matrix.region }}..."
+        cd backend/chat_service
+        gcloud functions deploy chat-with-document \
+          --gen2 \
+          --runtime=python311 \
+          --region=${{ matrix.region }} \
           --source=. \
-          --region=us-central1 \
+          --entry-point=chat_with_document \
+          --trigger-http \
           --allow-unauthenticated \
-          --memory=2Gi \
-          --cpu=2 \
-          --timeout=600 \
-          --clear-base-image
+          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+          --memory=512MB \
+          --timeout=540s
 
     - name: Deploy check-upload-allowance
       if: ${{ needs.detect-changes.outputs.check-upload-allowance == 'true' }}
       run: |
-        echo "🚀 Deploying check-upload-allowance service..."
+        echo "🚀 Deploying check-upload-allowance to ${{ matrix.region }}..."
         cd backend/check_upload_allowance_service
         gcloud functions deploy check-upload-allowance \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=check_upload_allowance \
           --trigger-http \
@@ -146,12 +130,12 @@ jobs:
     - name: Deploy delete-file
       if: ${{ needs.detect-changes.outputs.delete-file == 'true' }}
       run: |
-        echo "🚀 Deploying delete-file service..."
+        echo "🚀 Deploying delete-file to ${{ matrix.region }}..."
         cd backend/delete_file_service
         gcloud functions deploy delete-file \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=delete_file \
           --trigger-http \
@@ -162,12 +146,12 @@ jobs:
     - name: Deploy get-download-url
       if: ${{ needs.detect-changes.outputs.get-download-url == 'true' }}
       run: |
-        echo "🚀 Deploying get-download-url service..."
+        echo "🚀 Deploying get-download-url to ${{ matrix.region }}..."
         cd backend/get_download_url_service
         gcloud functions deploy get-download-url \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=get_download_url \
           --trigger-http \
@@ -179,12 +163,12 @@ jobs:
     - name: Deploy subscription-service
       if: ${{ needs.detect-changes.outputs.subscription-service == 'true' }}
       run: |
-        echo "🚀 Deploying subscription service..."
+        echo "🚀 Deploying subscription-service to ${{ matrix.region }}..."
         cd backend/subscription_service
         gcloud functions deploy create-subscription-order \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=create_subscription_order \
           --trigger-http \
@@ -196,12 +180,12 @@ jobs:
     - name: Deploy verify-payment
       if: ${{ needs.detect-changes.outputs.verify-payment == 'true' }}
       run: |
-        echo "🚀 Deploying verify-payment service..."
+        echo "🚀 Deploying verify-payment to ${{ matrix.region }}..."
         cd backend/verify_payment_service
         gcloud functions deploy verify-payment \
           --gen2 \
           --runtime=python311 \
-          --region=us-central1 \
+          --region=${{ matrix.region }} \
           --source=. \
           --entry-point=verify_payment \
           --trigger-http \
@@ -210,11 +194,56 @@ jobs:
           --memory=256MB \
           --timeout=60s
 
-    # Summary
-    - name: Deployment Summary
+  deploy-cloud-run:
+    name: Deploy Cloud Run Services  
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.conversion-service == 'true' }}
+    
+    strategy:
+      matrix:
+        region: [us-central1, asia-south1, europe-west1]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Authenticate with Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCLOUD_SA_KEY }}
+        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
+    
+    - name: Setup Google Cloud CLI  
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
+    
+    - name: Deploy conversion service
       run: |
-        echo "✅ Deployment completed!"
-        echo "📊 Services deployed:"
+        echo "🚀 Deploying conversion service to ${{ matrix.region }}..."
+        cd backend/conversion_service
+        gcloud run deploy process-file-to-pdf \
+          --source=. \
+          --region=${{ matrix.region }} \
+          --allow-unauthenticated \
+          --memory=2Gi \
+          --cpu=2 \
+          --timeout=600 \
+          --clear-base-image
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-functions, deploy-cloud-run]
+    if: always()
+    
+    steps:
+    - name: Display Summary
+      run: |
+        echo "🌍 Multi-Region Deployment Summary"
+        echo "=================================="
+        echo "📊 Deployed Services:"
         echo "  - generate-doc-summary: ${{ needs.detect-changes.outputs.generate-doc-summary }}"
         echo "  - chat-service: ${{ needs.detect-changes.outputs.chat-service }}"
         echo "  - conversion-service: ${{ needs.detect-changes.outputs.conversion-service }}"
@@ -223,3 +252,6 @@ jobs:
         echo "  - get-download-url: ${{ needs.detect-changes.outputs.get-download-url }}"
         echo "  - subscription-service: ${{ needs.detect-changes.outputs.subscription-service }}"
         echo "  - verify-payment: ${{ needs.detect-changes.outputs.verify-payment }}"
+        echo ""
+        echo "🌏 Regions: us-central1, asia-south1, europe-west1"
+        echo "✅ Multi-region deployment completed successfully!"

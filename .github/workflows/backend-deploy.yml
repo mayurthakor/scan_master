@@ -25,54 +25,85 @@ jobs:
           services=()
           
           # Check each service for changes
+          changed_services=()
+          
           if git diff HEAD~1 --name-only | grep -q "backend/generate_doc_summary_service/"; then
-            services+=('{"service":"generate_doc_summary_service","function_name":"generate-doc-summary","entry_point":"generate_doc_summary","service_account":"generate-doc-summary-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("generate_doc_summary_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/chat_service/"; then
-            services+=('{"service":"chat_service","function_name":"chat-with-document","entry_point":"chat_with_document","service_account":"chat-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("chat_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/conversion_service/"; then
-            services+=('{"service":"conversion_service","service_name":"document-converter","service_account":"conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"run"}')
+            changed_services+=("conversion_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/check_upload_allowance_service/"; then
-            services+=('{"service":"check_upload_allowance_service","function_name":"check-upload-allowance","entry_point":"check_upload_allowance","service_account":"check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("check_upload_allowance_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/delete_file_service/"; then
-            services+=('{"service":"delete_file_service","function_name":"delete-file","entry_point":"delete_file","service_account":"delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("delete_file_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/get_download_url_service/"; then
-            services+=('{"service":"get_download_url_service","function_name":"get-download-url","entry_point":"get_signed_url","service_account":"get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("get_download_url_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/subscription_service/"; then
-            services+=('{"service":"subscription_service","function_name":"create-subscription-order","entry_point":"create_subscription_order","service_account":"subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("subscription_service")
           fi
           
           if git diff HEAD~1 --name-only | grep -q "backend/verify_payment_service/"; then
-            services+=('{"service":"verify_payment_service","function_name":"verify-payment","entry_point":"verify_payment","service_account":"verify-payment-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+            changed_services+=("verify_payment_service")
           fi
           
-          # Create matrix for all regions
-          matrix=()
-          regions=("us-central1" "asia-south1" "europe-west1")
+          # Create matrix
+          matrix="["
+          first=true
           
-          for service_json in "${services[@]}"; do
-            for region in "${regions[@]}"; do
-              matrix+=("$(echo "$service_json" | jq --arg region "$region" '. + {region: $region}')")
+          for service in "${changed_services[@]}"; do
+            for region in "us-central1" "asia-south1" "europe-west1"; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                matrix+=","
+              fi
+              
+              case "$service" in
+                "generate_doc_summary_service")
+                  matrix+="{\"service\":\"generate_doc_summary_service\",\"function_name\":\"generate-doc-summary\",\"entry_point\":\"generate_doc_summary\",\"service_account\":\"generate-doc-summary-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "chat_service")
+                  matrix+="{\"service\":\"chat_service\",\"function_name\":\"chat-with-document\",\"entry_point\":\"chat_with_document\",\"service_account\":\"chat-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "conversion_service")
+                  matrix+="{\"service\":\"conversion_service\",\"service_name\":\"document-converter\",\"service_account\":\"conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"run\",\"region\":\"$region\"}"
+                  ;;
+                "check_upload_allowance_service")
+                  matrix+="{\"service\":\"check_upload_allowance_service\",\"function_name\":\"check-upload-allowance\",\"entry_point\":\"check_upload_allowance\",\"service_account\":\"check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "delete_file_service")
+                  matrix+="{\"service\":\"delete_file_service\",\"function_name\":\"delete-file\",\"entry_point\":\"delete_file\",\"service_account\":\"delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "get_download_url_service")
+                  matrix+="{\"service\":\"get_download_url_service\",\"function_name\":\"get-download-url\",\"entry_point\":\"get_signed_url\",\"service_account\":\"get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "subscription_service")
+                  matrix+="{\"service\":\"subscription_service\",\"function_name\":\"create-subscription-order\",\"entry_point\":\"create_subscription_order\",\"service_account\":\"subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+                "verify_payment_service")
+                  matrix+="{\"service\":\"verify_payment_service\",\"function_name\":\"verify-payment\",\"entry_point\":\"verify_payment\",\"service_account\":\"verify-payment-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;
+              esac
             done
           done
           
-          # Convert to JSON array
-          printf -v matrix_json '%s,' "${matrix[@]}"
-          matrix_json="[${matrix_json%,}]"
+          matrix+="]"
           
-          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
-          echo "Detected changes matrix: $matrix_json"
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Matrix created successfully"
 
   deploy:
     needs: detect-changes

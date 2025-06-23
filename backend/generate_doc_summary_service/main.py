@@ -1,3 +1,4 @@
+# Multi-region deployment test
 # backend/generate_doc_summary_service/main.py
 import os
 import functions_framework

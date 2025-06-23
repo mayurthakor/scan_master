@@ -11,6 +11,8 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}
   GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+  PRIMARY_REGION: us-central1
+  SECONDARY_REGION: asia-south1
 
 jobs:
   detect-changes:

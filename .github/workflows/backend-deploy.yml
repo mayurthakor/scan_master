@@ -74,28 +74,28 @@ jobs:
               
               case "$service" in
                 "generate_doc_summary_service")
-                  matrix+="{\"service\":\"generate_doc_summary_service\",\"function_name\":\"generate-doc-summary\",\"entry_point\":\"generate_doc_summary\",\"service_account\":\"generate-doc-summary-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"generate_doc_summary_service\",\"function_name\":\"generate-doc-summary\",\"entry_point\":\"generate_doc_summary\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "chat_service")
-                  matrix+="{\"service\":\"chat_service\",\"function_name\":\"chat-with-document\",\"entry_point\":\"chat_with_document\",\"service_account\":\"chat-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"chat_service\",\"function_name\":\"chat-with-document\",\"entry_point\":\"chat_with_document\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "conversion_service")
-                  matrix+="{\"service\":\"conversion_service\",\"service_name\":\"document-converter\",\"service_account\":\"conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"run\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"conversion_service\",\"service_name\":\"document-converter\",\"type\":\"run\",\"region\":\"$region\"}"
                   ;;
                 "check_upload_allowance_service")
-                  matrix+="{\"service\":\"check_upload_allowance_service\",\"function_name\":\"check-upload-allowance\",\"entry_point\":\"check_upload_allowance\",\"service_account\":\"check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"check_upload_allowance_service\",\"function_name\":\"check-upload-allowance\",\"entry_point\":\"check_upload_allowance\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "delete_file_service")
-                  matrix+="{\"service\":\"delete_file_service\",\"function_name\":\"delete-file\",\"entry_point\":\"delete_file\",\"service_account\":\"delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"delete_file_service\",\"function_name\":\"delete-file\",\"entry_point\":\"delete_file\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "get_download_url_service")
-                  matrix+="{\"service\":\"get_download_url_service\",\"function_name\":\"get-download-url\",\"entry_point\":\"get_signed_url\",\"service_account\":\"get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"get_download_url_service\",\"function_name\":\"get-download-url\",\"entry_point\":\"get_signed_url\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "subscription_service")
-                  matrix+="{\"service\":\"subscription_service\",\"function_name\":\"create-subscription-order\",\"entry_point\":\"create_subscription_order\",\"service_account\":\"subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"subscription_service\",\"function_name\":\"create-subscription-order\",\"entry_point\":\"create_subscription_order\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "verify_payment_service")
-                  matrix+="{\"service\":\"verify_payment_service\",\"function_name\":\"verify-payment\",\"entry_point\":\"verify_payment\",\"service_account\":\"verify-payment-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"verify_payment_service\",\"function_name\":\"verify-payment\",\"entry_point\":\"verify_payment\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
               esac
             done
@@ -145,6 +145,32 @@ jobs:
       - name: Deploy Cloud Function
         if: matrix.type == 'function'
         run: |
+          # Generate service account email based on service name
+          SERVICE_ACCOUNT=""
+          case "${{ matrix.service }}" in
+            "generate_doc_summary_service")
+              SERVICE_ACCOUNT="generate-doc-summary-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "chat_service")
+              SERVICE_ACCOUNT="chat-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "check_upload_allowance_service")
+              SERVICE_ACCOUNT="check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "delete_file_service")
+              SERVICE_ACCOUNT="delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "get_download_url_service")
+              SERVICE_ACCOUNT="get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "subscription_service")
+              SERVICE_ACCOUNT="subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+            "verify_payment_service")
+              SERVICE_ACCOUNT="verify-payment-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;
+          esac
+          
           # Determine environment variables based on service
           ENV_VARS=""
           
@@ -170,6 +196,8 @@ jobs:
           esac
           
           echo "Deploying ${{ matrix.function_name }} to ${{ matrix.region }}"
+          echo "Service account: $SERVICE_ACCOUNT"
+          echo "Environment variables: $ENV_VARS"
           
           gcloud functions deploy ${{ matrix.function_name }} \
             --gen2 \
@@ -180,20 +208,24 @@ jobs:
             --entry-point=${{ matrix.entry_point }} \
             --trigger-http \
             --allow-unauthenticated \
-            --service-account=${{ matrix.service_account }} \
+            --service-account=$SERVICE_ACCOUNT \
             $ENV_VARS
       
       - name: Deploy Cloud Run Service
         if: matrix.type == 'run'
         run: |
+          # Generate service account email for Cloud Run
+          SERVICE_ACCOUNT="conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+          
           echo "Deploying ${{ matrix.service_name }} to ${{ matrix.region }}"
+          echo "Service account: $SERVICE_ACCOUNT"
           
           gcloud run deploy ${{ matrix.service_name }} \
             --source=backend/${{ matrix.service }} \
             --project=$PROJECT_ID \
             --region=${{ matrix.region }} \
             --allow-unauthenticated \
-            --service-account=${{ matrix.service_account }} \
+            --service-account=$SERVICE_ACCOUNT \
             --port=8080 \
             --memory=2Gi \
             --cpu=1 \

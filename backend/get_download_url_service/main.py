@@ -71,6 +71,6 @@ def get_download_url(request):
 
     except Exception as e:
         error_message = f"Backend Error: {type(e).__name__} - {str(e)}"
-        print(f"!!! RETURNING ERROR TO CLIENT: {error_message}")
+        print(f"!!! RETURNING ERROR TO CLIENT SIDE: {error_message}")
         error_payload = {"error": {"status": "INTERNAL", "message": error_message}}
         return (jsonify(error_payload), 500, headers)

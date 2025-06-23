@@ -1,6 +1,7 @@
 // lib/services/api_service.dart
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:scan_master/services/enhanced_api_service.dart';
 
 class ApiService {
   // Specify the region to match where your functions are deployed
@@ -11,21 +12,18 @@ class ApiService {
   /// This calls the new generate-doc-summary function
   Future<String> prepareChatSession(String documentId) async {
     try {
-      final callable = _functions.httpsCallable('generate-doc-summary');
-      final response = await callable.call<Map<String, dynamic>>({
-        'documentId': documentId,
-      });
+      // NEW: Use enhanced API service with automatic fallback
+      final response = await EnhancedApiService.instance.generateDocSummary(documentId);
 
-      final summary = response.data['summary'] as String?;
+      final summary = response['summary'] as String?;
       if (summary == null) {
         throw Exception('Failed to get summary from response.');
       }
       return summary;
 
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to prepare chat session: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      // Keep the same error handling as before
+      throw Exception('Failed to prepare chat session: $e');
     }
   }
 

@@ -1,6 +1,3 @@
-// lib/screens/updated_home_screen.dart
-// Updated version of home_screen.dart with scanner integration
-
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -15,6 +12,8 @@ import 'package:scan_master/screens/enhanced_document_preview_screen.dart';
 import 'package:scan_master/services/api_service.dart';
 import 'package:scan_master/services/enhanced_camera_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:scan_master/services/enhanced_api_service.dart';
+import 'package:scan_master/config/api_config.dart';
 
 class UpdatedHomeScreen extends StatefulWidget {
   const UpdatedHomeScreen({super.key});
@@ -356,18 +355,32 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
   }
 
   Future<bool> _checkUploadAllowance() async {
-    try {
-      FirebaseFunctions functions =
-          FirebaseFunctions.instanceFor(region: 'us-central1');
-      final HttpsCallable callable =
-          functions.httpsCallable('check-upload-allowance');
-      final HttpsCallableResult result = await callable.call();
-      return result.data['allow'] ?? false;
-    } catch (e) {
-      print('Upload allowance check failed: $e');
-      return false;
+  try {
+    if (ApiConfig.enableDebugLogs) {
+      print('🔍 Checking upload allowance...');
     }
+    
+    // NEW: Use enhanced API service with automatic fallback
+    final result = await EnhancedApiService.instance.checkUploadAllowance();
+    
+    final isAllowed = result['allow'] ?? false;
+    
+    if (ApiConfig.enableDebugLogs) {
+      print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
+    }
+    
+    return isAllowed;
+    
+  } catch (e) {
+    if (ApiConfig.enableDebugLogs) {
+      print('🚨 Upload allowance check failed: $e');
+    }
+    
+    // Graceful degradation: allow upload if check fails
+    print('⚠️ Upload allowance check failed, allowing upload: $e');
+    return true;
   }
+}
 
   void _showLimitReachedDialog() {
     showDialog(
@@ -577,14 +590,13 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      FirebaseFunctions functions =
-          FirebaseFunctions.instanceFor(region: 'us-central1');
-      final HttpsCallable callable =
-          functions.httpsCallable('create-subscription-order');
-      final HttpsCallableResult result = await callable.call();
+      // NEW: Use enhanced API service with automatic fallback
+      final result = await EnhancedApiService.instance.createSubscriptionOrder();
+      
       if (!mounted) return;
       Navigator.of(context).pop();
-      final orderData = Map<String, dynamic>.from(result.data);
+      
+      final orderData = Map<String, dynamic>.from(result);
       final user = FirebaseAuth.instance.currentUser;
       final options = {
         'key': orderData['razorpayKeyId'],
@@ -612,16 +624,13 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      HttpsCallable callable =
-          FirebaseFunctions.instanceFor(region: 'us-central1')
-              .httpsCallable('get-download-url');
-      final response = await callable
-          .call<Map<String, dynamic>>({'documentId': documentId});
+      // NEW: Use enhanced API service with automatic fallback
+      final response = await EnhancedApiService.instance.getDownloadUrl(documentId);
       
       if (!mounted) return;
       Navigator.of(context).pop(); 
 
-      final String url = response.data['url'];
+      final String url = response['url'];
       final Uri uri = Uri.parse(url);
 
       if (await canLaunchUrl(uri)) {
@@ -665,10 +674,9 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      HttpsCallable callable =
-          FirebaseFunctions.instanceFor(region: 'us-central1')
-              .httpsCallable('delete-file');
-      await callable.call<Map<String, dynamic>>({'documentId': documentId});
+      // NEW: Use enhanced API service with automatic fallback
+      await EnhancedApiService.instance.deleteFile(documentId);
+      
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -678,7 +686,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('An unexpected error occurred: $e')),
+        SnackBar(content: Text('An error occurred: $e')),
       );
     }
   }

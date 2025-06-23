@@ -7,7 +7,7 @@ import functions_framework
 from flask import jsonify
 import time
 
-# Initialize Firebase Admin SDK
+# Initialize Firebase Admin SDK 
 firebase_admin.initialize_app()
 
 def access_secret_version(secret_id, version_id="latest"):

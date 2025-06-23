@@ -2,256 +2,190 @@ name: Deploy Backend Services (Multi-Region)
 
 on:
   push:
-    branches: [ main ]
-    paths: [ 'backend/**' ]
+    branches: [main]
+    paths: ['backend/**']
   workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}
-  GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
 
 jobs:
   detect-changes:
-    name: Detect Changed Services
     runs-on: ubuntu-latest
     outputs:
-      generate-doc-summary: ${{ steps.changes.outputs.generate-doc-summary }}
-      chat-service: ${{ steps.changes.outputs.chat-service }}
-      conversion-service: ${{ steps.changes.outputs.conversion-service }}
-      check-upload-allowance: ${{ steps.changes.outputs.check-upload-allowance }}
-      delete-file: ${{ steps.changes.outputs.delete-file }}
-      get-download-url: ${{ steps.changes.outputs.get-download-url }}
-      subscription-service: ${{ steps.changes.outputs.subscription-service }}
-      verify-payment: ${{ steps.changes.outputs.verify-payment }}
-    
+      matrix: ${{ steps.changes.outputs.matrix }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Detect changes
-      uses: dorny/paths-filter@v2
-      id: changes
-      with:
-        filters: |
-          generate-doc-summary:
-            - 'backend/generate_doc_summary_service/**'
-          chat-service:
-            - 'backend/chat_service/**'
-          conversion-service:
-            - 'backend/conversion_service/**'
-          check-upload-allowance:
-            - 'backend/check_upload_allowance_service/**'
-          delete-file:
-            - 'backend/delete_file_service/**'
-          get-download-url:
-            - 'backend/get_download_url_service/**'
-          subscription-service:
-            - 'backend/subscription_service/**'
-          verify-payment:
-            - 'backend/verify_payment_service/**'
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect changed services
+        id: changes
+        run: |
+          services=()
+          
+          # Check each service for changes
+          if git diff HEAD~1 --name-only | grep -q "backend/generate_doc_summary_service/"; then
+            services+=('{"service":"generate_doc_summary_service","function_name":"generate-doc-summary","entry_point":"generate_doc_summary","service_account":"generate-doc-summary-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/chat_service/"; then
+            services+=('{"service":"chat_service","function_name":"chat-with-document","entry_point":"chat_with_document","service_account":"chat-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/conversion_service/"; then
+            services+=('{"service":"conversion_service","service_name":"document-converter","service_account":"conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"run"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/check_upload_allowance_service/"; then
+            services+=('{"service":"check_upload_allowance_service","function_name":"check-upload-allowance","entry_point":"check_upload_allowance","service_account":"check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/delete_file_service/"; then
+            services+=('{"service":"delete_file_service","function_name":"delete-file","entry_point":"delete_file","service_account":"delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/get_download_url_service/"; then
+            services+=('{"service":"get_download_url_service","function_name":"get-download-url","entry_point":"get_signed_url","service_account":"get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/subscription_service/"; then
+            services+=('{"service":"subscription_service","function_name":"create-subscription-order","entry_point":"create_subscription_order","service_account":"subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          if git diff HEAD~1 --name-only | grep -q "backend/verify_payment_service/"; then
+            services+=('{"service":"verify_payment_service","function_name":"verify-payment","entry_point":"verify_payment","service_account":"verify-payment-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com","type":"function"}')
+          fi
+          
+          # Create matrix for all regions
+          matrix=()
+          regions=("us-central1" "asia-south1" "europe-west1")
+          
+          for service_json in "${services[@]}"; do
+            for region in "${regions[@]}"; do
+              matrix+=("$(echo "$service_json" | jq --arg region "$region" '. + {region: $region}')")
+            done
+          done
+          
+          # Convert to JSON array
+          printf -v matrix_json '%s,' "${matrix[@]}"
+          matrix_json="[${matrix_json%,}]"
+          
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          echo "Detected changes matrix: $matrix_json"
 
-  deploy-functions:
-    name: Deploy Cloud Functions
-    runs-on: ubuntu-latest
+  deploy:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' || needs.detect-changes.outputs.chat-service == 'true' || needs.detect-changes.outputs.check-upload-allowance == 'true' || needs.detect-changes.outputs.delete-file == 'true' || needs.detect-changes.outputs.get-download-url == 'true' || needs.detect-changes.outputs.subscription-service == 'true' || needs.detect-changes.outputs.verify-payment == 'true' }}
-    
+    if: needs.detect-changes.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        region: [us-central1, asia-south1, europe-west1]
+        include: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      max-parallel: 3
+      fail-fast: false
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Authenticate with Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCLOUD_SA_KEY }}
-        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
-    
-    - name: Setup Google Cloud CLI
-      uses: google-github-actions/setup-gcloud@v2
-      with:
-        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
-    
-    - name: Deploy generate-doc-summary
-      if: ${{ needs.detect-changes.outputs.generate-doc-summary == 'true' }}
-      run: |
-        echo "🚀 Deploying generate-doc-summary to ${{ matrix.region }}..."
-        cd backend/generate_doc_summary_service
-        gcloud functions deploy generate-doc-summary \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=generate_doc_summary \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
-          --memory=512MB \
-          --timeout=540s
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCLOUD_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Prepare service account key for signing services
+        if: matrix.service == 'get_download_url_service'
+        run: |
+          echo '${{ secrets.GCLOUD_SA_KEY }}' > backend/get_download_url_service/service-account-key.json
+      
+      - name: Deploy Cloud Function
+        if: matrix.type == 'function'
+        run: |
+          # Determine environment variables based on service
+          ENV_VARS=""
+          
+          case "${{ matrix.service }}" in
+            "subscription_service")
+              ENV_VARS="--set-env-vars=RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}"
+              ;;
+            "verify_payment_service")
+              ENV_VARS="--set-env-vars=RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}"
+              ;;
+            "generate_doc_summary_service")
+              ENV_VARS="--set-env-vars=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+              ;;
+            "chat_service")
+              ENV_VARS="--set-env-vars=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+              ;;
+            "get_download_url_service")
+              ENV_VARS="--set-env-vars=GCS_BUCKET=${{ secrets.GCS_BUCKET }}"
+              ;;
+            *)
+              ENV_VARS=""
+              ;;
+          esac
+          
+          echo "Deploying ${{ matrix.function_name }} to ${{ matrix.region }}"
+          
+          gcloud functions deploy ${{ matrix.function_name }} \
+            --gen2 \
+            --runtime=python311 \
+            --project=$PROJECT_ID \
+            --region=${{ matrix.region }} \
+            --source=backend/${{ matrix.service }} \
+            --entry-point=${{ matrix.entry_point }} \
+            --trigger-http \
+            --allow-unauthenticated \
+            --service-account=${{ matrix.service_account }} \
+            $ENV_VARS
+      
+      - name: Deploy Cloud Run Service
+        if: matrix.type == 'run'
+        run: |
+          echo "Deploying ${{ matrix.service_name }} to ${{ matrix.region }}"
+          
+          gcloud run deploy ${{ matrix.service_name }} \
+            --source=backend/${{ matrix.service }} \
+            --project=$PROJECT_ID \
+            --region=${{ matrix.region }} \
+            --allow-unauthenticated \
+            --service-account=${{ matrix.service_account }} \
+            --port=8080 \
+            --memory=2Gi \
+            --cpu=1 \
+            --timeout=300
+      
+      - name: Clean up service account key
+        if: always() && matrix.service == 'get_download_url_service'
+        run: |
+          rm -f backend/get_download_url_service/service-account-key.json
+      
+      - name: Verify deployment
+        run: |
+          if [ "${{ matrix.type }}" = "function" ]; then
+            echo "Verifying function deployment: ${{ matrix.function_name }}"
+            gcloud functions describe ${{ matrix.function_name }} \
+              --region=${{ matrix.region }} \
+              --project=$PROJECT_ID \
+              --format="value(name,status)"
+          else
+            echo "Verifying Cloud Run deployment: ${{ matrix.service_name }}"
+            gcloud run services describe ${{ matrix.service_name }} \
+              --region=${{ matrix.region }} \
+              --project=$PROJECT_ID \
+              --format="value(metadata.name,status.conditions[0].status)"
+          fi
 
-    - name: Deploy chat-service
-      if: ${{ needs.detect-changes.outputs.chat-service == 'true' }}
-      run: |
-        echo "🚀 Deploying chat-service to ${{ matrix.region }}..."
-        cd backend/chat_service
-        gcloud functions deploy chat-with-document \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=chat_with_document \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
-          --memory=512MB \
-          --timeout=540s
-
-    - name: Deploy check-upload-allowance
-      if: ${{ needs.detect-changes.outputs.check-upload-allowance == 'true' }}
-      run: |
-        echo "🚀 Deploying check-upload-allowance to ${{ matrix.region }}..."
-        cd backend/check_upload_allowance_service
-        gcloud functions deploy check-upload-allowance \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=check_upload_allowance \
-          --trigger-http \
-          --allow-unauthenticated \
-          --memory=256MB \
-          --timeout=60s
-
-    - name: Deploy delete-file
-      if: ${{ needs.detect-changes.outputs.delete-file == 'true' }}
-      run: |
-        echo "🚀 Deploying delete-file to ${{ matrix.region }}..."
-        cd backend/delete_file_service
-        gcloud functions deploy delete-file \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=delete_file \
-          --trigger-http \
-          --allow-unauthenticated \
-          --memory=256MB \
-          --timeout=60s
-
-    - name: Deploy get-download-url
-      if: ${{ needs.detect-changes.outputs.get-download-url == 'true' }}
-      run: |
-        echo "🚀 Deploying get-download-url to ${{ matrix.region }}..."
-        cd backend/get_download_url_service
-        gcloud functions deploy get-download-url \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=get_download_url \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
-          --memory=256MB \
-          --timeout=60s
-
-    - name: Deploy subscription-service
-      if: ${{ needs.detect-changes.outputs.subscription-service == 'true' }}
-      run: |
-        echo "🚀 Deploying subscription-service to ${{ matrix.region }}..."
-        cd backend/subscription_service
-        gcloud functions deploy create-subscription-order \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=create_subscription_order \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
-          --memory=256MB \
-          --timeout=60s
-
-    - name: Deploy verify-payment
-      if: ${{ needs.detect-changes.outputs.verify-payment == 'true' }}
-      run: |
-        echo "🚀 Deploying verify-payment to ${{ matrix.region }}..."
-        cd backend/verify_payment_service
-        gcloud functions deploy verify-payment \
-          --gen2 \
-          --runtime=python311 \
-          --region=${{ matrix.region }} \
-          --source=. \
-          --entry-point=verify_payment \
-          --trigger-http \
-          --allow-unauthenticated \
-          --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
-          --memory=256MB \
-          --timeout=60s
-
-  deploy-cloud-run:
-    name: Deploy Cloud Run Services  
+  notify:
+    needs: [detect-changes, deploy]
+    if: always() && needs.detect-changes.outputs.matrix != '[]'
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.conversion-service == 'true' }}
-    
-    strategy:
-      matrix:
-        region: [us-central1, asia-south1, europe-west1]
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Authenticate with Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCLOUD_SA_KEY }}
-        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
-    
-    - name: Setup Google Cloud CLI  
-      uses: google-github-actions/setup-gcloud@v2
-      with:
-        project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
-    
-    - name: Deploy conversion service
-      run: |
-        echo "🚀 Deploying conversion service to ${{ matrix.region }}..."
-        cd backend/conversion_service
-        gcloud run deploy process-file-to-pdf \
-          --source=. \
-          --region=${{ matrix.region }} \
-          --allow-unauthenticated \
-          --memory=2Gi \
-          --cpu=2 \
-          --timeout=600 \
-          --clear-base-image
-
-  deployment-summary:
-    name: Deployment Summary
-    runs-on: ubuntu-latest
-    needs: [detect-changes, deploy-functions, deploy-cloud-run]
-    if: always()
-    
-    steps:
-    - name: Display Summary
-      run: |
-        echo "🌍 Multi-Region Deployment Summary"
-        echo "=================================="
-        echo "📊 Deployed Services:"
-        echo "  - generate-doc-summary: ${{ needs.detect-changes.outputs.generate-doc-summary }}"
-        echo "  - chat-service: ${{ needs.detect-changes.outputs.chat-service }}"
-        echo "  - conversion-service: ${{ needs.detect-changes.outputs.conversion-service }}"
-        echo "  - check-upload-allowance: ${{ needs.detect-changes.outputs.check-upload-allowance }}"
-        echo "  - delete-file: ${{ needs.detect-changes.outputs.delete-file }}"
-        echo "  - get-download-url: ${{ needs.detect-changes.outputs.get-download-url }}"
-        echo "  - subscription-service: ${{ needs.detect-changes.outputs.subscription-service }}"
-        echo "  - verify-payment: ${{ needs.detect-changes.outputs.verify-payment }}"
-        echo ""
-        echo "🌏 Regions: us-central1, asia-south1, europe-west1"
-        echo "✅ Multi-region deployment completed successfully!"
+      - name: Deployment Summary
+        run: |
+          echo "Deployment completed!"
+          echo "Project: ${{ secrets.GCLOUD_PROJECT_ID }}"
+          echo "Notification email: ${{ secrets.NOTIFICATION_EMAIL }}"
+          echo "Services deployed across 3 regions"

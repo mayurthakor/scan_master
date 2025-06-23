@@ -142,6 +142,21 @@ jobs:
           --set-env-vars="RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
           --memory=256MB \
           --timeout=60s
+    # Step 11: Deploy get-download-url service
+    - name: Deploy get-download-url
+      run: |
+        cd backend/get_download_url_service
+        gcloud functions deploy get-download-url \
+          --gen2 \
+          --runtime=python311 \
+          --region=us-central1 \
+          --source=. \
+          --entry-point=get_download_url \
+          --trigger-http \
+          --allow-unauthenticated \
+          --set-env-vars="GCS_BUCKET=${{ secrets.GCS_BUCKET }}" \
+          --memory=256MB \
+          --timeout=60s
     
     # Step 10: Send notification
     - name: Send success notification

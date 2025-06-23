@@ -107,7 +107,7 @@ jobs:
           echo "Matrix: $matrix"
           echo "Changed services: ${changed_services[*]}"
           
-          # Set a simple boolean flag for has_changes
+          # Set a simple boolean flag for has_changes 
           if [ ${#changed_services[@]} -gt 0 ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "Matrix created successfully with ${#changed_services[@]} services"

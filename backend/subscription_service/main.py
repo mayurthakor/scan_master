@@ -72,3 +72,4 @@ def create_subscription_order(request):
         print(f"!!! RETURNING ERROR TO CLIENT: {error_message}")
         return (jsonify({"error": {"status": "INTERNAL", "message": error_message}}), 500, headers)# Test change for environment variables
 # Testing fixed conditionals
+# Debug enhanced conditionals

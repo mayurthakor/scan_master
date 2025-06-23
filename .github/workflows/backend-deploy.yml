@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.changes.outputs.matrix }}
+      has_changes: ${{ steps.changes.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -106,20 +107,22 @@ jobs:
           echo "Matrix: $matrix"
           echo "Changed services: ${changed_services[*]}"
           
-          # Handle empty matrix case
-          if [ "$matrix" = "[]" ]; then
-            echo "No backend services changed - skipping deployment"
-          else
+          # Set a simple boolean flag for has_changes
+          if [ ${#changed_services[@]} -gt 0 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "Matrix created successfully with ${#changed_services[@]} services"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No backend services changed - skipping deployment"
           fi
 
   deploy:
     needs: detect-changes
-    if: needs.detect-changes.outputs.matrix != '[]' && needs.detect-changes.outputs.matrix != ''
+    if: needs.detect-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include: ${{ fromJson(needs.detect-changes.outputs.matrix || '[]') }}
+        include: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
       max-parallel: 3
       fail-fast: false
     
@@ -219,7 +222,7 @@ jobs:
 
   notify:
     needs: [detect-changes, deploy]
-    if: always() && needs.detect-changes.outputs.matrix != '[]' && needs.detect-changes.outputs.matrix != ''
+    if: always() && needs.detect-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Deployment Summary

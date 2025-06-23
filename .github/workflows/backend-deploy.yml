@@ -140,7 +140,7 @@ jobs:
       - name: Prepare service account key for signing services
         if: matrix.service == 'get_download_url_service'
         run: |
-          echo '${{ secrets.GCLOUD_SA_KEY }}' > backend/get_download_url_service/service-account-key.json
+          echo '${{ secrets.PDF_DOWNLOADER_SA_KEY }}' > backend/get_download_url_service/service-account-key.json
       
       - name: Deploy Cloud Function
         if: matrix.type == 'function'
@@ -161,7 +161,7 @@ jobs:
               SERVICE_ACCOUNT="delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
               ;;
             "get_download_url_service")
-              SERVICE_ACCOUNT="get-download-url-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              SERVICE_ACCOUNT="pdf-downloader-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
               ;;
             "subscription_service")
               SERVICE_ACCOUNT="subscription-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"

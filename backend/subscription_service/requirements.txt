@@ -1,7 +1,4 @@
-google-cloud-firestore
-google-cloud-secret-manager
-firebase-admin
-firebase-functions
-functions-framework
-Flask
-razorpay
+google-cloud-firestore==2.16.0
+firebase-admin==6.5.0
+functions-framework==3.5.0
+razorpay==1.4.2

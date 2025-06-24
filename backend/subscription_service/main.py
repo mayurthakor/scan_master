@@ -1,22 +1,15 @@
+# backend/subscription_service/main.py
 import os
 import firebase_admin
 from firebase_admin import auth
-from google.cloud import secretmanager
 import razorpay
 import functions_framework
 from flask import jsonify
 import time
 
-# Initialize Firebase Admin SDK 
-firebase_admin.initialize_app()
-
-def access_secret_version(secret_id, version_id="latest"):
-    """Accesses a secret version with a hardcoded project ID."""
-    client = secretmanager.SecretManagerServiceClient()
-    # HARDCODING the project ID to remove any ambiguity. 
-    name = f"projects/scan-master-app/secrets/{secret_id}/versions/{version_id}"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+# Initialize Firebase Admin SDK (only once)
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
 
 @functions_framework.http
 def create_subscription_order(request):
@@ -38,16 +31,18 @@ def create_subscription_order(request):
         decoded_token = auth.verify_id_token(id_token)
         uid = decoded_token['uid']
 
-        # --- 2. Get credentials ---
+        # --- 2. Get credentials from environment variables (FIXED) ---
         key_id = os.environ.get('RAZORPAY_KEY_ID')
         
-        # We now directly use the known secret name, project ID is hardcoded in the function
-        key_secret = os.environ.get('RAZORPAY_KEY_SECRET')
+        if not key_id:
+            raise ValueError("Razorpay Key ID not configured")
         
-        razorpay_client = razorpay.Client(auth=(key_id, key_secret))
+        # For order creation, we typically only need the key_id
+        # The secret is mainly for webhooks and signature verification
+        razorpay_client = razorpay.Client(auth=(key_id, ''))
 
         # --- 3. Create a Razorpay Order ---
-        order_amount = 49900 
+        order_amount = 49900  # ₹499.00 in paise
         order_currency = 'INR'
         order_receipt = f'rcpt_{uid[-12:]}_{int(time.time())}'
 

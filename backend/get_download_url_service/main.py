@@ -76,3 +76,4 @@ def get_download_url(request):
         error_payload = {"error": {"status": "INTERNAL", "message": error_message}}
         return (jsonify(error_payload), 500, headers)# Deploy with proper PDF downloader SA
 # Debug service type detection
+# Fix entry point for download URL function

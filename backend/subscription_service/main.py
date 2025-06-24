@@ -33,13 +33,13 @@ def create_subscription_order(request):
 
         # --- 2. Get credentials from environment variables (FIXED) ---
         key_id = os.environ.get('RAZORPAY_KEY_ID')
+        key_secret = os.environ.get('RAZORPAY_KEY_SECRET')
         
-        if not key_id:
-            raise ValueError("Razorpay Key ID not configured")
+        if not key_id or not key_secret:
+            raise ValueError("Razorpay credentials not configured")
         
-        # For order creation, we typically only need the key_id
-        # The secret is mainly for webhooks and signature verification
-        razorpay_client = razorpay.Client(auth=(key_id, ''))
+        # Both key_id and key_secret are required for creating orders
+        razorpay_client = razorpay.Client(auth=(key_id, key_secret))
 
         # --- 3. Create a Razorpay Order ---
         order_amount = 49900  # ₹499.00 in paise

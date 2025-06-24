@@ -42,7 +42,7 @@ def create_subscription_order(request):
         key_id = os.environ.get('RAZORPAY_KEY_ID')
         
         # We now directly use the known secret name, project ID is hardcoded in the function
-        key_secret = access_secret_version('razorpay-key-secret')
+        key_secret = os.environ.get('RAZORPAY_KEY_SECRET')
         
         razorpay_client = razorpay.Client(auth=(key_id, key_secret))
 

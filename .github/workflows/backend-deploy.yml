@@ -89,7 +89,7 @@ jobs:
                   matrix+="{\"service\":\"delete_file_service\",\"function_name\":\"delete-file\",\"entry_point\":\"delete_file\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "get_download_url_service")
-                  matrix+="{\"service\":\"get_download_url_service\",\"function_name\":\"get-download-url\",\"entry_point\":\"get_signed_url\",\"type\":\"function\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"get_download_url_service\",\"function_name\":\"get-download-url\",\"entry_point\":\"get_download_url\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "subscription_service")
                   matrix+="{\"service\":\"subscription_service\",\"function_name\":\"create-subscription-order\",\"entry_point\":\"create_subscription_order\",\"type\":\"function\",\"region\":\"$region\"}"

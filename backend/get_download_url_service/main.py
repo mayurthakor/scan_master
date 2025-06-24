@@ -1,79 +1,158 @@
-#checking multiregional deployment
 import os
 import datetime
 from google.cloud import firestore, storage
-from google.oauth2 import service_account # Import this
+from google.oauth2 import service_account
 import functions_framework
 from flask import jsonify
 import firebase_admin
 from firebase_admin import auth
 
-# --- USE ENVIRONMENT CREDENTIALS FOR CI/CD ---
-# Use default credentials provided by the environment (GitHub Actions)
-storage_client = storage.Client()
+# Initialize Firebase Admin (only if not already initialized)
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
 
-# Firestore and Auth can still use the default environment credentials.
-firebase_admin.initialize_app()
+# Load credentials from the service account key file for URL signing
+credentials = service_account.Credentials.from_service_account_file('service-account-key.json')
+
+# Initialize clients with the signing credentials
+storage_client = storage.Client(credentials=credentials)
 db = firestore.Client()
-# --- END OF NEW SETUP ---
-
 
 @functions_framework.http
 def get_download_url(request):
     """
-    Final version using explicit service account key for signing URLs.
+    Generate a signed download URL for a PDF document.
+    Requires the service account key file for URL signing.
     """
     # Set CORS headers
     if request.method == 'OPTIONS':
-        headers = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '3600'}
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '3600'
+        }
         return ('', 204, headers)
+    
     headers = {'Access-Control-Allow-Origin': '*'}
 
     try:
-        # --- Authentication remains the same ---
+        # Authentication - verify Firebase Auth token
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
-            raise ValueError("Missing or invalid Authorization header.")
+            return jsonify({
+                'error': {
+                    'message': 'Missing or invalid Authorization header',
+                    'status': 'UNAUTHORIZED'
+                }
+            }), 401, headers
+
+        # Extract and verify the ID token
         id_token = auth_header.split('Bearer ')[1]
         decoded_token = auth.verify_id_token(id_token)
         user_id = decoded_token['uid']
 
-        data = request.get_json()['data']
-        doc_id = data['documentId']
+        # Get request data
+        request_json = request.get_json()
+        if not request_json or 'data' not in request_json:
+            return jsonify({
+                'error': {
+                    'message': 'Invalid request format. Expected {"data": {"documentId": "..."}}',
+                    'status': 'BAD_REQUEST'
+                }
+            }), 400, headers
+
+        data = request_json['data']
+        document_id = data.get('documentId')
         
-        doc_ref = db.collection('files').document(doc_id)
+        if not document_id:
+            return jsonify({
+                'error': {
+                    'message': 'Missing documentId parameter',
+                    'status': 'BAD_REQUEST'
+                }
+            }), 400, headers
+
+        # Get document metadata from Firestore
+        doc_ref = db.collection('files').document(document_id)
         document = doc_ref.get()
 
         if not document.exists:
-            raise FileNotFoundError("File record not found.")
+            return jsonify({
+                'error': {
+                    'message': 'Document not found',
+                    'status': 'NOT_FOUND'
+                }
+            }), 404, headers
 
         doc_data = document.to_dict()
+        
+        # Verify the user owns this document
         if doc_data.get('userId') != user_id:
-            raise PermissionError("User does not own this file.")
+            return jsonify({
+                'error': {
+                    'message': 'Access denied. User does not own this document.',
+                    'status': 'FORBIDDEN'
+                }
+            }), 403, headers
 
+        # Get the PDF path from the document
         pdf_path = doc_data.get('pdfPath')
         if not pdf_path:
-            raise ValueError("Record is missing 'pdfPath'.")
+            return jsonify({
+                'error': {
+                    'message': 'PDF path not found in document metadata',
+                    'status': 'NOT_FOUND'
+                }
+            }), 404, headers
 
-        # --- Generate the Signed URL using the key-based client ---
-        bucket_name = os.environ.get('GCS_BUCKET')
+        # Get bucket name from environment variable
+        bucket_name = os.environ.get('GCS_BUCKET', 'scan-master-app.firebasestorage.app')
+        
+        # Generate signed URL using the service account credentials
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(pdf_path)
 
-        # We no longer need to specify service_account_email because the client
-        # itself was created with the key and knows how to sign.
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=15),
-            method="GET",
-        )
-        
-        return (jsonify({"data": {"url": signed_url}}), 200, headers)
+        # Check if the file exists
+        if not blob.exists():
+            return jsonify({
+                'error': {
+                    'message': f'File not found in storage: {pdf_path}',
+                    'status': 'NOT_FOUND'
+                }
+            }), 404, headers
 
+        # Generate signed URL (valid for 1 hour)
+        expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+        
+        signed_url = blob.generate_signed_url(
+            expiration=expiration,
+            method='GET',
+            version='v4'
+        )
+
+        # Return the signed URL
+        return jsonify({
+            'result': {
+                'url': signed_url,
+                'expires': expiration.isoformat() + 'Z',
+                'filename': doc_data.get('originalFileName', 'document.pdf')
+            }
+        }), 200, headers
+
+    except auth.InvalidIdTokenError:
+        return jsonify({
+            'error': {
+                'message': 'Invalid authentication token',
+                'status': 'UNAUTHORIZED'
+            }
+        }), 401, headers
+    
     except Exception as e:
-        error_message = f"Backend Error: {type(e).__name__} - {str(e)}"
-        print(f"!!! RETURNING ERROR TO CLIENT SIDE LAYER: {error_message}")
-        error_payload = {"error": {"status": "INTERNAL", "message": error_message}}
-        return (jsonify(error_payload), 500, headers)# Deploy with proper PDF downloader SA
-# Debug service type detection
-# Fix entry point for download URL function
+        print(f"!!! RETURNING ERROR TO CLIENT SIDE LAYER: Backend Error: {type(e).__name__} - {str(e)}")
+        return jsonify({
+            'error': {
+                'message': f'Backend Error: {type(e).__name__} - {str(e)}',
+                'status': 'INTERNAL'
+            }
+        }), 500, headers

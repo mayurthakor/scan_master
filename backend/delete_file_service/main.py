@@ -77,4 +77,5 @@ def delete_file(request):
         error_message = f"Backend Error: {type(e).__name__} - {str(e)}"
         print(f"!!! RETURNING ERROR TO CLIENT: {error_message}")
         error_payload = {"error": {"status": "INTERNAL", "message": error_message}}
-        return (jsonify(error_payload), 500, headers)  
+        return (jsonify(error_payload), 500, headers) 
+    #for force update

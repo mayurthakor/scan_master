@@ -10,12 +10,12 @@ class ApiConfig {
   // Individual service flags (for granular control)
   static const Map<String, bool> serviceFlags = {
     'check-upload-allowance': true,  // ✅ MIGRATED SUCCESSFULLY
-    'get-download-url': false,       // 🚨 BACKEND ISSUE - Service account signing
+    'get-download-url': true,       // 🚨 BACKEND ISSUE - Service account signing
     'delete-file': true,             // ✅ MIGRATED SUCCESSFULLY  
-    'generate-doc-summary': false,   // 🚨 BACKEND ISSUE - Missing GEMINI_API_KEY
-    'chat-with-document': false,     // 🚨 BACKEND ISSUE - Missing GEMINI_API_KEY  
+    'generate-doc-summary': true,   // 🚨 BACKEND ISSUE - Missing GEMINI_API_KEY
+    'chat-with-document': true,     // 🚨 BACKEND ISSUE - Missing GEMINI_API_KEY  
     'create-subscription-order': true, // 🆕 TRY PAYMENT SERVICE (no AI required)
-    'verify-payment': false,
+    'verify-payment': true,
   };
   
   // 🌍 ENDPOINT CONFIGURATION

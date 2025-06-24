@@ -37,7 +37,6 @@ class EnhancedApiService {
   
   // 🏥 HEALTH CHECKING
   
-  /// Quick health check for load balancer
   Future<bool> _checkLoadBalancerHealth() async {
     try {
       if (ApiConfig.enableDebugLogs) {
@@ -47,12 +46,14 @@ class EnhancedApiService {
       final response = await _httpClient.get(
         Uri.parse('${ApiConfig.loadBalancerBaseUrl}/upload-check'),
         headers: {
-          'Authorization': 'Bearer ${await _getAuthToken()}',
+          'Content-Type': 'application/json',
+          // Don't include Authorization header for health check
         },
       ).timeout(ApiConfig.healthCheckTimeout);
       
-      // Any response (even error) means routing works
-      final isHealthy = response.statusCode != 0;
+      // Load balancer is healthy if it responds (even with 401/500 errors)
+      // We just want to confirm the routing and SSL are working
+      final isHealthy = response.statusCode >= 200 && response.statusCode < 600;
       
       if (ApiConfig.enableDebugLogs) {
         print('🏥 Load balancer health: ${isHealthy ? "✅ Healthy" : "❌ Unhealthy"} (Status: ${response.statusCode})');

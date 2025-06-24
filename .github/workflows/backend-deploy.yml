@@ -190,6 +190,9 @@ jobs:
             "get_download_url_service")
               ENV_VARS="--set-env-vars=GCS_BUCKET=${{ secrets.GCS_BUCKET }}"
               ;;
+            "delete_file_service")
+              ENV_VARS="--set-env-vars=GCS_BUCKET=${{ secrets.GCS_BUCKET }}"
+              ;;  
             *)
               ENV_VARS=""
               ;;

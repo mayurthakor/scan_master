@@ -5,11 +5,36 @@ import functions_framework
 from datetime import datetime, timedelta
 import time
 import os
-from google.cloud.firestore_v1.aggregation import AggregationQuery
 
 # Initialize Firebase Admin SDK
 firebase_admin.initialize_app()
 db = firestore.client()
+
+# Simple in-memory cache for upload counts
+upload_cache = {}
+CACHE_TTL_MINUTES = 5  # Cache for 5 minutes
+
+def get_cached_upload_count(uid):
+    """Get cached upload count if available and not expired"""
+    if uid in upload_cache:
+        cached_data = upload_cache[uid]
+        cache_time = datetime.fromisoformat(cached_data['timestamp'])
+        if datetime.now() - cache_time < timedelta(minutes=CACHE_TTL_MINUTES):
+            print(f"🚀 Using cached count for {uid}: {cached_data['count']}")
+            return cached_data['count']
+        else:
+            # Remove expired cache
+            del upload_cache[uid]
+            print(f"⏰ Cache expired for {uid}")
+    return None
+
+def cache_upload_count(uid, count):
+    """Cache the upload count for a user"""
+    upload_cache[uid] = {
+        'count': count,
+        'timestamp': datetime.now().isoformat()
+    }
+    print(f"💾 Cached count {count} for {uid}")
 
 @functions_framework.http
 def check_upload_allowance(request):
@@ -67,6 +92,9 @@ def check_upload_allowance(request):
             print(f"👤 User creation took: {(create_time - user_doc_time)*1000:.0f}ms")
             print(f"⏱️ TOTAL TIME (new user): {(create_time - start_time)*1000:.0f}ms")
             
+            # Cache 0 count for new user
+            cache_upload_count(uid, 0)
+            
             # Since this is a new user, they are under the limit. Allow the upload.
             return (jsonify({"data": {"allow": True, "reason": "New user profile created."}}), 200, headers)
 
@@ -80,33 +108,37 @@ def check_upload_allowance(request):
             
             return (jsonify({"data": {"allow": True, "reason": "User is subscribed"}}), 200, headers)
 
-        # --- 3. Count uploads in the last 7 days ---
+        # --- 3. Count uploads in the last 7 days (WITH CACHING) ---
         print(f"📊 Starting file count query for user {uid}")
         query_start_time = time.time()
         
-        # OPTIMIZED: Use Firestore count aggregation (much faster)
-        one_week_ago = datetime.now() - timedelta(days=7)
-        files_query = db.collection('files')\
-            .where('userId', '==', uid)\
-            .where('uploadTimestamp', '>=', one_week_ago)
-        
-        try:
-            # Try to use count aggregation (fastest method)
-            count_query = AggregationQuery(files_query).count()
-            query_result = count_query.get()
-            upload_count = query_result[0][0].value
-            print(f"📊 Used count aggregation")
-        except Exception as count_error:
-            print(f"⚠️ Count aggregation failed: {count_error}, falling back to limited query")
-            # Fallback: Use limited query
-            limited_query = files_query.limit(FREE_TIER_LIMIT + 1).select(['userId'])
-            docs = list(limited_query.stream())
+        # Try cache first
+        cached_count = get_cached_upload_count(uid)
+        if cached_count is not None:
+            upload_count = cached_count
+            query_end_time = time.time()
+            print(f"🚀 Cache hit - query took: {(query_end_time - query_start_time)*1000:.0f}ms")
+        else:
+            # Fall back to Firestore query
+            print(f"🔍 Cache miss - querying Firestore")
+            one_week_ago = datetime.now() - timedelta(days=7)
+            
+            # Use simple limited query for reliability
+            files_query = db.collection('files')\
+                .where('userId', '==', uid)\
+                .where('uploadTimestamp', '>=', one_week_ago)\
+                .limit(FREE_TIER_LIMIT + 1)\
+                .select(['userId'])  # Minimal field selection
+            
+            docs = list(files_query.stream())
             upload_count = len(docs)
-            print(f"📊 Used limited query fallback")
+            
+            # Cache the result
+            cache_upload_count(uid, upload_count)
+            
+            query_end_time = time.time()
+            print(f"🔍 Firestore query took: {(query_end_time - query_start_time)*1000:.0f}ms")
 
-        # TIMING: After Firestore query
-        query_end_time = time.time()
-        print(f"🔍 Firestore query took: {(query_end_time - query_start_time)*1000:.0f}ms")
         print(f"📁 Found {upload_count} files for user {uid}")
 
         # --- 4. Enforce the free tier limit ---

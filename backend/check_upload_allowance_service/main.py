@@ -79,6 +79,11 @@ def check_upload_allowance(request):
         print(f"📊 Starting file count query for user {uid}")
         query_start_time = time.time()
         
+        # --- 4. Enforce the free tier limit ---
+        # Get free tier limit from environment variable (default: 5)
+        FREE_TIER_LIMIT = int(os.environ.get('FREE_TIER_LIMIT', '5'))
+        print(f"🎯 Using FREE_TIER_LIMIT: {FREE_TIER_LIMIT}")
+
         one_week_ago = datetime.now() - timedelta(days=7)
         # OPTIMIZED: Only get what we need to check the limit
         files_query = db.collection('files')\
@@ -86,19 +91,14 @@ def check_upload_allowance(request):
             .where('uploadTimestamp', '>=', one_week_ago)\
             .limit(FREE_TIER_LIMIT + 1)\
             .select([])  # Only get document IDs, not full documents
-        
-        # Count documents without downloading full data
-        upload_count = len([doc.id for doc in files_query.stream()])
 
         # TIMING: After Firestore query
         query_end_time = time.time()
         print(f"🔍 Firestore query took: {(query_end_time - query_start_time)*1000:.0f}ms")
         print(f"📁 Found {upload_count} files for user {uid}")
 
-        # --- 4. Enforce the free tier limit ---
-        # Get free tier limit from environment variable (default: 5)
-        FREE_TIER_LIMIT = int(os.environ.get('FREE_TIER_LIMIT', '5'))
-        print(f"🎯 Using FREE_TIER_LIMIT: {FREE_TIER_LIMIT}")
+        # Count documents without downloading full data
+        upload_count = len([doc.id for doc in files_query.stream()])
 
         if upload_count < FREE_TIER_LIMIT:
             final_time = time.time()

@@ -95,10 +95,10 @@ def check_upload_allowance(request):
         # TIMING: After Firestore query
         query_end_time = time.time()
         print(f"🔍 Firestore query took: {(query_end_time - query_start_time)*1000:.0f}ms")
-        print(f"📁 Found {upload_count} files for user {uid}")
 
         # Count documents without downloading full data
         upload_count = len([doc.id for doc in files_query.stream()])
+        print(f"📁 Found {upload_count} files for user {uid}")
 
         if upload_count < FREE_TIER_LIMIT:
             final_time = time.time()

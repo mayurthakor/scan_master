@@ -192,6 +192,9 @@ jobs:
               ;;
             "delete_file_service")
               ENV_VARS="--set-env-vars=GCS_BUCKET=${{ secrets.GCS_BUCKET }}"
+              ;;
+            "check_upload_allowance_service")
+              ENV_VARS="--set-env-vars=FREE_TIER_LIMIT=${{ secrets.FREE_TIER_LIMIT }}"
               ;;  
             *)
               ENV_VARS=""

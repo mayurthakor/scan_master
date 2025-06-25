@@ -95,7 +95,7 @@ class ApiService {
         'userId': userId,
       });
       
-      return response.data['allowed'] as bool? ?? false;
+      return response.data['allow'] as bool? ?? false;
     } on FirebaseFunctionsException catch (e) {
       print('Failed to check upload allowance: ${e.message}');
       return false; // Default to not allowed if error

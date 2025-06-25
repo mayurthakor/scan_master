@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'enhanced_edge_detection_service.dart';
+import 'edge_detection_service.dart';
 import 'document_type_recognition_service.dart';
 
 class BatchScanningService {

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'enhanced_edge_detection_service.dart';
+import 'edge_detection_service.dart';
 import 'document_type_recognition_service.dart';
 
 class EnhancedImageProcessingService {

@@ -4,8 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/document_type_recognition_service.dart';
-import '../services/enhanced_image_processing_service.dart';
-import '../services/enhanced_edge_detection_service.dart';
+import '../services/image_processing_service.dart';
+import '../services/edge_detection_service.dart';
 
 class EnhancedDocumentPreviewScreen extends StatefulWidget {
   final String imagePath;

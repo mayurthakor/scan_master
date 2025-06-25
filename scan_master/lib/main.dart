@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'package:scan_master/screens/updated_home_screen.dart';
+import 'package:scan_master/screens/home_screen.dart';
 import 'package:scan_master/screens/login_screen.dart';
 
 Future<void> main() async {

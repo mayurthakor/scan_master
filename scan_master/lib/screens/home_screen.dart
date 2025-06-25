@@ -8,11 +8,10 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:scan_master/screens/chat_screen.dart';
-import 'package:scan_master/screens/enhanced_document_preview_screen.dart';
+import 'package:scan_master/screens/document_preview_screen.dart';
 import 'package:scan_master/services/api_service.dart';
-import 'package:scan_master/services/enhanced_camera_service.dart';
+import 'package:scan_master/services/camera_service.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:scan_master/services/enhanced_api_service.dart';
 import 'package:scan_master/config/api_config.dart';
 
 class UpdatedHomeScreen extends StatefulWidget {
@@ -29,7 +28,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
   Stream<DocumentSnapshot?>? _userStream;
   Stream<QuerySnapshot>? _filesStream;
 
-  final ApiService _apiService = ApiService();
+  final ApiService _apiService = ApiService.instance;
   final Map<String, bool> _isPreparingChat = {};
 
   @override
@@ -361,9 +360,11 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     }
     
     // NEW: Use enhanced API service with automatic fallback
-    final result = await EnhancedApiService.instance.checkUploadAllowance();
-    
-    final isAllowed = result['allow'] ?? false;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false; // or handle appropriately
+    final result = await ApiService.instance.checkUploadAllowance(user.uid);
+        
+    final isAllowed = result;
     
     if (ApiConfig.enableDebugLogs) {
       print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
@@ -590,14 +591,14 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      // NEW: Use enhanced API service with automatic fallback
-      final result = await EnhancedApiService.instance.createSubscriptionOrder();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return; // or handle appropriately
+      final result = await ApiService.instance.createSubscriptionOrder(user.uid);
       
       if (!mounted) return;
       Navigator.of(context).pop();
       
       final orderData = Map<String, dynamic>.from(result);
-      final user = FirebaseAuth.instance.currentUser;
       final options = {
         'key': orderData['razorpayKeyId'],
         'amount': orderData['amount'],
@@ -624,13 +625,12 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      // NEW: Use enhanced API service with automatic fallback
-      final response = await EnhancedApiService.instance.getDownloadUrl(documentId);
+      // Get the download URL directly (it returns a String, not a Map)
+      final String url = await ApiService.instance.getDownloadUrl(documentId);
       
       if (!mounted) return;
       Navigator.of(context).pop(); 
 
-      final String url = response['url'];
       final Uri uri = Uri.parse(url);
 
       if (await canLaunchUrl(uri)) {
@@ -675,7 +675,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     );
     try {
       // NEW: Use enhanced API service with automatic fallback
-      await EnhancedApiService.instance.deleteFile(documentId);
+      await ApiService.instance.deleteFile(documentId);
       
       if (!mounted) return;
       Navigator.of(context).pop();

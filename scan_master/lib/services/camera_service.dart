@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'enhanced_edge_detection_service.dart';
+import 'edge_detection_service.dart';
 import 'batch_scanning_service.dart';
 
 // Enum declaration at top level (outside class)

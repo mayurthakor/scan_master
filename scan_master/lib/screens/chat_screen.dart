@@ -21,7 +21,8 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final ApiService _apiService = ApiService();
+  
+  final ApiService _apiService = ApiService.instance;
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _isLoading = false;

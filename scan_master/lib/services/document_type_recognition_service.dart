@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
-import 'enhanced_edge_detection_service.dart';
+import 'edge_detection_service.dart';
 
 class DocumentTypeRecognitionService {
   static DocumentTypeRecognitionService? _instance;

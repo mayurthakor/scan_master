@@ -147,19 +147,62 @@ class ApiService {
     }
   }
 
-  /// Check if user can upload more files (upload allowance)
+  
+  /// Check if user can upload more files (upload allowance) - DEBUG VERSION
   Future<bool> checkUploadAllowance(String userId) async {
     try {
       final response = await _callService('check-upload-allowance', {
         'userId': userId,
       });
       
-      // Backend returns 'allow' key, not 'allowed'
-      return response['allow'] as bool? ?? false;
+      // EXTENSIVE DEBUG LOGGING
+      print('🔍 === UPLOAD ALLOWANCE DEBUG ===');
+      print('🔍 Raw response: $response');
+      print('🔍 Response type: ${response.runtimeType}');
+      print('🔍 Response keys: ${response.keys.toList()}');
+      
+      // Check each possible location for the allow field
+      if (response.containsKey('data')) {
+        print('📋 Found "data" key');
+        final data = response['data'];
+        print('📋 data content: $data');
+        print('📋 data type: ${data.runtimeType}');
+        
+        if (data is Map<String, dynamic>) {
+          print('📋 data keys: ${data.keys.toList()}');
+          if (data.containsKey('allow')) {
+            final allowValue = data['allow'];
+            print('📋 Found data.allow: $allowValue (type: ${allowValue.runtimeType})');
+            return allowValue as bool? ?? false;
+          }
+          if (data.containsKey('allowed')) {
+            final allowedValue = data['allowed'];
+            print('📋 Found data.allowed: $allowedValue (type: ${allowedValue.runtimeType})');
+            return allowedValue as bool? ?? false;
+          }
+        }
+      }
+      
+      if (response.containsKey('allow')) {
+        final allowValue = response['allow'];
+        print('📋 Found direct allow: $allowValue (type: ${allowValue.runtimeType})');
+        return allowValue as bool? ?? false;
+      }
+      
+      if (response.containsKey('allowed')) {
+        final allowedValue = response['allowed'];
+        print('📋 Found direct allowed: $allowedValue (type: ${allowedValue.runtimeType})');
+        return allowedValue as bool? ?? false;
+      }
+      
+      print('❌ No allow/allowed field found anywhere!');
+      print('🔍 Full response structure: ${response.toString()}');
+      
+      return false;
              
     } catch (e) {
-      print('Failed to check upload allowance: $e');
-      return false; // Default to not allowed if error
+      print('🚨 Exception in checkUploadAllowance: $e');
+      return false;
     }
   }
 

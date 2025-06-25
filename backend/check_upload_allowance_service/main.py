@@ -5,6 +5,7 @@ import functions_framework
 from datetime import datetime, timedelta
 import time
 import os
+from google.cloud.firestore_v1.aggregation import AggregationQuery
 
 # Initialize Firebase Admin SDK
 firebase_admin.initialize_app()
@@ -25,6 +26,10 @@ def check_upload_allowance(request):
         # START TIMING
         start_time = time.time()
         print(f"🕐 Function started at: {start_time}")
+        
+        # Get free tier limit from environment variable (default: 5)
+        FREE_TIER_LIMIT = int(os.environ.get('FREE_TIER_LIMIT', '5'))
+        print(f"🎯 Using FREE_TIER_LIMIT: {FREE_TIER_LIMIT}")
         
         # --- 1. Authenticate the user ---
         auth_header = request.headers.get('Authorization')
@@ -79,27 +84,32 @@ def check_upload_allowance(request):
         print(f"📊 Starting file count query for user {uid}")
         query_start_time = time.time()
         
-        # --- 4. Enforce the free tier limit ---
-        # Get free tier limit from environment variable (default: 5)
-        FREE_TIER_LIMIT = int(os.environ.get('FREE_TIER_LIMIT', '5'))
-        print(f"🎯 Using FREE_TIER_LIMIT: {FREE_TIER_LIMIT}")
-
+        # OPTIMIZED: Use Firestore count aggregation (much faster)
         one_week_ago = datetime.now() - timedelta(days=7)
-        # OPTIMIZED: Only get what we need to check the limit
         files_query = db.collection('files')\
             .where('userId', '==', uid)\
-            .where('uploadTimestamp', '>=', one_week_ago)\
-            .limit(FREE_TIER_LIMIT + 1)\
-            .select([])  # Only get document IDs, not full documents
+            .where('uploadTimestamp', '>=', one_week_ago)
+        
+        try:
+            # Try to use count aggregation (fastest method)
+            count_query = AggregationQuery(files_query).count()
+            query_result = count_query.get()
+            upload_count = query_result[0][0].value
+            print(f"📊 Used count aggregation")
+        except Exception as count_error:
+            print(f"⚠️ Count aggregation failed: {count_error}, falling back to limited query")
+            # Fallback: Use limited query
+            limited_query = files_query.limit(FREE_TIER_LIMIT + 1).select(['userId'])
+            docs = list(limited_query.stream())
+            upload_count = len(docs)
+            print(f"📊 Used limited query fallback")
 
         # TIMING: After Firestore query
         query_end_time = time.time()
         print(f"🔍 Firestore query took: {(query_end_time - query_start_time)*1000:.0f}ms")
-
-        # Count documents without downloading full data
-        upload_count = len([doc.id for doc in files_query.stream()])
         print(f"📁 Found {upload_count} files for user {uid}")
 
+        # --- 4. Enforce the free tier limit ---
         if upload_count < FREE_TIER_LIMIT:
             final_time = time.time()
             print(f"✅ Allow response prep took: {(final_time - query_end_time)*1000:.0f}ms")
@@ -111,8 +121,9 @@ def check_upload_allowance(request):
             print(f"❌ Deny response prep took: {(final_time - query_end_time)*1000:.0f}ms")
             print(f"⏱️ TOTAL TIME (denied): {(final_time - start_time)*1000:.0f}ms")
             
-            return (jsonify({"data": {"allow": False, "reason": f"Weekly upload limit of {FREE_TIER_LIMIT} files has been reached."}}), 200, headers)     
+            return (jsonify({"data": {"allow": False, "reason": f"Weekly upload limit of {FREE_TIER_LIMIT} files has been reached."}}), 200, headers)
+            
     except Exception as e:
         error_message = f"Backend Error: {type(e).__name__} - {str(e)}"
         print(f"!!! RETURNING ERROR TO CLIENT: {error_message}")
-        return (jsonify({"error": {"status": "INTERNAL", "message": error_message}}), 500, headers)  
+        return (jsonify({"error": {"status": "INTERNAL", "message": error_message}}), 500, headers)

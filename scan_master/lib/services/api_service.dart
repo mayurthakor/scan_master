@@ -1,6 +1,10 @@
 // lib/services/api_service.dart
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/api_config.dart';
 
 class ApiService {
   // Singleton pattern for consistency with other services
@@ -10,51 +14,110 @@ class ApiService {
   // Private constructor
   ApiService._();
   
-  // Specify the region to match where your functions are deployed
-  final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+  // Firebase Functions fallback
+  final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: ApiConfig.fallbackRegion);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  /// Generic method to call either load balancer or Firebase Functions
+  Future<Map<String, dynamic>> _callService(String serviceName, Map<String, dynamic> data) async {
+    if (ApiConfig.shouldUseLoadBalancer(serviceName)) {
+      return await _callLoadBalancer(serviceName, data);
+    } else {
+      return await _callFirebaseFunction(serviceName, data);
+    }
+  }
+
+  /// Call service via load balancer
+  Future<Map<String, dynamic>> _callLoadBalancer(String serviceName, Map<String, dynamic> data) async {
+    try {
+      final url = ApiConfig.getLoadBalancerUrl(serviceName);
+      final user = FirebaseAuth.instance.currentUser;
+      final token = await user?.getIdToken();
+
+      if (ApiConfig.enableDebugLogs) {
+        print('🌍 Calling load balancer: $url');
+      }
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'data': data}),
+      ).timeout(ApiConfig.requestTimeout);
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        
+        if (ApiConfig.enableDebugLogs) {
+          print('✅ Load balancer response: ${response.statusCode}');
+        }
+        
+        return responseData;
+      } else {
+        throw Exception('Load balancer error: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      if (ApiConfig.enableDebugLogs) {
+        print('🚨 Load balancer failed: $e');
+        print('⬇️ Falling back to Firebase Functions...');
+      }
+      // Fallback to Firebase Functions
+      return await _callFirebaseFunction(serviceName, data);
+    }
+  }
+
+  /// Call service via Firebase Functions (fallback)
+  Future<Map<String, dynamic>> _callFirebaseFunction(String serviceName, Map<String, dynamic> data) async {
+    try {
+      final callable = _functions.httpsCallable(serviceName);
+      final response = await callable.call<Map<String, dynamic>>(data);
+      
+      if (ApiConfig.enableDebugLogs) {
+        print('🔥 Firebase Functions response for $serviceName');
+      }
+      
+      return response.data;
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception('Firebase Functions error: ${e.message}');
+    }
+  }
+
   /// Prepares a document for chat by generating a summary
-  /// This calls the new generate-doc-summary function
   Future<String> prepareChatSession(String documentId) async {
     try {
-      final callable = _functions.httpsCallable('generate-doc-summary');
-      final response = await callable.call<Map<String, dynamic>>({
+      final response = await _callService('generate-doc-summary', {
         'documentId': documentId,
       });
 
-      final summary = response.data['summary'] as String?;
+      final summary = response['summary'] as String?;
       if (summary == null) {
         throw Exception('Failed to get summary from response.');
       }
       return summary;
 
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to prepare chat session: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to prepare chat session: $e');
     }
   }
 
   /// Asks a question about a document that has been prepared for chat
   Future<String> askQuestion(String documentId, String question) async {
     try {
-      final callable = _functions.httpsCallable('chat-with-document');
-      final response = await callable.call<Map<String, dynamic>>({
+      final response = await _callService('chat-with-document', {
         'documentId': documentId,
         'question': question,
       });
       
-      final answer = response.data['answer'] as String?;
+      final answer = response['answer'] as String?;
       if (answer == null) {
         throw Exception('Failed to get answer from response.');
       }
       return answer;
       
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to get answer: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to get answer: $e');
     }
   }
 
@@ -76,94 +139,77 @@ class ApiService {
   /// Optional: Method to delete chat history for a document
   Future<void> deleteChatHistory(String documentId) async {
     try {
-      final callable = _functions.httpsCallable('delete-chat-history');
-      await callable.call<Map<String, dynamic>>({
+      await _callService('delete-chat-history', {
         'documentId': documentId,
       });
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to delete chat history: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to delete chat history: $e');
     }
   }
 
   /// Check if user can upload more files (upload allowance)
   Future<bool> checkUploadAllowance(String userId) async {
     try {
-      final callable = _functions.httpsCallable('check-upload-allowance');
-      final response = await callable.call<Map<String, dynamic>>({
+      final response = await _callService('check-upload-allowance', {
         'userId': userId,
       });
       
-      return response.data['allow'] as bool? ?? false;
-    } on FirebaseFunctionsException catch (e) {
-      print('Failed to check upload allowance: ${e.message}');
-      return false; // Default to not allowed if error
+      // Backend returns 'allow' key, not 'allowed'
+      return response['allow'] as bool? ?? false;
+             
     } catch (e) {
-      print('An unexpected error occurred: $e');
-      return false;
+      print('Failed to check upload allowance: $e');
+      return false; // Default to not allowed if error
     }
   }
 
   /// Create subscription order for Razorpay
   Future<Map<String, dynamic>> createSubscriptionOrder(String userId) async {
     try {
-      final callable = _functions.httpsCallable('create-subscription-order');
-      final response = await callable.call<Map<String, dynamic>>({
+      final response = await _callService('create-subscription-order', {
         'userId': userId,
       });
       
-      return response.data;
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to create subscription order: ${e.message}');
+      return response;
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to create subscription order: $e');
     }
   }
 
   /// Verify payment after successful Razorpay payment
   Future<void> verifyPayment(Map<String, dynamic> paymentData) async {
     try {
-      final callable = _functions.httpsCallable('verify-payment');
-      await callable.call<Map<String, dynamic>>(paymentData);
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to verify payment: ${e.message}');
+      await _callService('verify-payment', paymentData);
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to verify payment: $e');
     }
   }
 
   /// Get download URL for a file
   Future<String> getDownloadUrl(String documentId) async {
     try {
-      final callable = _functions.httpsCallable('get-download-url');
-      final response = await callable.call<Map<String, dynamic>>({
+      final response = await _callService('get-download-url', {
         'documentId': documentId,
       });
       
-      final url = response.data['url'] as String?;
+      final url = response['url'] as String?;
       if (url == null) {
         throw Exception('Failed to get download URL from response.');
       }
       return url;
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to get download URL: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to get download URL: $e');
     }
   }
 
   /// Delete a file and its associated data
   Future<void> deleteFile(String documentId) async {
     try {
-      final callable = _functions.httpsCallable('delete-file');
-      await callable.call<Map<String, dynamic>>({
+      await _callService('delete-file', {
         'documentId': documentId,
       });
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception('Failed to delete file: ${e.message}');
     } catch (e) {
-      throw Exception('An unexpected error occurred: $e');
+      throw Exception('Failed to delete file: $e');
     }
   }
 }

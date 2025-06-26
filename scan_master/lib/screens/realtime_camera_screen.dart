@@ -8,7 +8,7 @@ import '../services/camera_service.dart';
 import '../services/edge_detection_service.dart';
 
 /// Real-time camera screen with live edge detection
-/// Phase 4.1 Implementation: Real-time Detection Foundation
+/// Phase 4.1 Implementation: Real-time Detection Foundation + Interactive Corners
 class RealtimeCameraScreen extends StatefulWidget {
   final Function(String imagePath) onImageCaptured;
   final bool enableAutoCapture;
@@ -39,6 +39,11 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
   // Detection state
   EdgeDetectionResult? _currentDetection;
   String _statusMessage = "Position document in frame";
+  
+  // Interactive corner adjustment state
+  bool _isInteractiveMode = false;
+  List<Offset> _adjustableCorners = [];
+  int? _selectedCornerIndex;
   
   // Animation controllers for smooth UI transitions
   late AnimationController _cornerAnimationController;
@@ -196,6 +201,10 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
   }
 
   String _generateStatusMessage(EdgeDetectionResult result) {
+    if (_isInteractiveMode) {
+      return "Drag corners to adjust detection";
+    }
+
     final phase = _cameraService.currentPhase;
     
     switch (phase) {
@@ -210,66 +219,26 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
         return "Captured!";
         
       default:
-        if (result.corners.isEmpty) {
+        if (result.corners.length == 4) {
+          if (result.confidence > 0.7) {
+            return "Perfect! Ready to capture";
+          } else if (result.confidence > 0.4) {
+            return "Adjust position for better quality";
+          } else {
+            return "Move closer or improve lighting";
+          }
+        } else {
           return "Position document in frame";
-        }
-        
-        if (result.confidence < 0.4) {
-          return "Move closer to document";
-        }
-        
-        if (result.confidence < 0.6) {
-          return "Improve lighting or focus";
-        }
-        
-        final status = _cameraService.autoCaptureStatus;
-        switch (status) {
-          case AutoCaptureStatus.stabilizing:
-            return "Hold steady...";
-          case AutoCaptureStatus.ready:
-            return "Perfect! Hold position";
-          default:
-            return "Position document clearly";
         }
     }
   }
 
   void _onAutoCapture() {
-    _captureImage();
-  }
-
-  Future<void> _captureImage() async {
-    if (_isCapturing) return;
-    
-    setState(() {
-      _isCapturing = true;
-    });
-    
-    try {
-      // Haptic feedback
-      HapticFeedback.mediumImpact();
-      
-      final imagePath = await _cameraService.captureImage();
-      if (imagePath != null) {
-        widget.onImageCaptured(imagePath);
-      } else {
-        _showError('Failed to capture image');
-      }
-      
-    } catch (e) {
-      _showError('Capture failed: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCapturing = false;
-        });
-      }
-    }
+    // Handle auto-capture completion
+    debugPrint('Auto-capture completed');
   }
 
   void _showError(String message) {
-    if (!mounted) return;
-    
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -279,47 +248,211 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
     );
   }
 
+  /// Toggle between automatic detection and manual corner adjustment
+  void _toggleInteractiveMode() {
+    setState(() {
+      _isInteractiveMode = !_isInteractiveMode;
+      
+      if (_isInteractiveMode && _currentDetection?.corners.length == 4) {
+        // Copy current detected corners for manual adjustment
+        _adjustableCorners = List.from(_currentDetection!.corners);
+        _selectedCornerIndex = null;
+      } else {
+        // Exit interactive mode
+        _adjustableCorners.clear();
+        _selectedCornerIndex = null;
+      }
+    });
+    
+    // Provide haptic feedback
+    HapticFeedback.lightImpact();
+    
+    // Update status message
+    _statusMessage = _isInteractiveMode 
+        ? "Drag corners to adjust detection"
+        : "Position document in frame";
+    
+    // Trigger status animation
+    _statusAnimationController.forward().then((_) {
+      if (mounted) {
+        _statusAnimationController.reverse();
+      }
+    });
+  }
+
+  /// Handle touch start for corner selection
+  void _onPanStart(DragStartDetails details) {
+    if (!_isInteractiveMode || _adjustableCorners.isEmpty) return;
+
+    final screenPoint = details.localPosition;
+    
+    // Find the closest corner within touch tolerance
+    double minDistance = double.infinity;
+    int? closestCornerIndex;
+
+    for (int i = 0; i < _adjustableCorners.length; i++) {
+      final corner = _adjustableCorners[i];
+      final distance = (corner - screenPoint).distance;
+      
+      if (distance < 50.0 && distance < minDistance) { // 50 pixel touch tolerance
+        minDistance = distance;
+        closestCornerIndex = i;
+      }
+    }
+
+    setState(() {
+      _selectedCornerIndex = closestCornerIndex;
+    });
+
+    if (_selectedCornerIndex != null) {
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  /// Handle corner dragging
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (!_isInteractiveMode || _selectedCornerIndex == null) return;
+
+    final screenPoint = details.localPosition;
+    
+    // Get camera preview size for boundary clamping
+    final cameraPreviewSize = _getCameraPreviewSize();
+    
+    // Clamp to camera preview boundaries
+    final clampedPoint = Offset(
+      screenPoint.dx.clamp(0.0, cameraPreviewSize.width),
+      screenPoint.dy.clamp(0.0, cameraPreviewSize.height),
+    );
+
+    setState(() {
+      _adjustableCorners[_selectedCornerIndex!] = clampedPoint;
+    });
+  }
+
+  /// Handle end of corner dragging
+  void _onPanEnd(DragEndDetails details) {
+    setState(() {
+      _selectedCornerIndex = null;
+    });
+  }
+
+  /// Get current camera preview size for boundary calculations
+  Size _getCameraPreviewSize() {
+    final controller = _cameraService.controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return Size.zero;
+    }
+    
+    // This is a simplified calculation - you may need to adjust based on your camera layout
+    return Size(
+      controller.value.previewSize?.height ?? 0,
+      controller.value.previewSize?.width ?? 0,
+    );
+  }
+
+  /// Capture with manually adjusted corners
+  Future<void> _captureWithAdjustedCorners() async {
+    if (!_isInteractiveMode || _adjustableCorners.length != 4) return;
+
+    setState(() {
+      _isCapturing = true;
+      _statusMessage = "Capturing with adjusted corners...";
+    });
+
+    try {
+      // Create a modified detection result with adjusted corners
+      final adjustedDetection = EdgeDetectionResult(
+        corners: _adjustableCorners,
+        confidence: 1.0, // High confidence since manually adjusted
+        method: 'manual_adjustment',
+        processingTimeMs: 0,
+        requiresManualAdjustment: false,
+      );
+
+      // Capture image with adjusted corners (we'll just use regular capture for now)
+      final imagePath = await _cameraService.captureImage();
+      if (imagePath != null) {
+        widget.onImageCaptured(imagePath);
+      } else {
+        throw Exception('Failed to capture image');
+      }
+
+    } catch (e) {
+      setState(() {
+        _statusMessage = "Capture failed: $e";
+      });
+      debugPrint('Manual capture error: $e');
+    } finally {
+      setState(() {
+        _isCapturing = false;
+        _isInteractiveMode = false;
+        _adjustableCorners.clear();
+        _selectedCornerIndex = null;
+      });
+    }
+  }
+
+  Future<void> _captureImage() async {
+    if (_isCapturing) return;
+    
+    setState(() {
+      _isCapturing = true;
+    });
+
+    try {
+      final imagePath = await _cameraService.captureImage();
+      if (imagePath != null) {
+        widget.onImageCaptured(imagePath);
+      } else {
+        _showError('Failed to capture image');
+      }
+    } catch (e) {
+      _showError('Failed to capture image: $e');
+    } finally {
+      setState(() {
+        _isCapturing = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // Camera preview
-          _buildCameraPreview(),
-          
-          // Detection overlay
-          if (_currentDetection != null)
-            _buildDetectionOverlay(),
-          
-          // UI Controls
-          _buildTopControls(),
-          _buildBottomControls(),
-          
-          // Loading overlay
-          if (_isLoading)
-            _buildLoadingOverlay(),
-          
-          // Error overlay
-          if (_error != null)
-            _buildErrorOverlay(),
-        ],
-      ),
+      body: _error != null
+          ? _buildErrorWidget()
+          : Stack(
+              children: [
+                // Camera Preview
+                if (_cameraService.controller?.value.isInitialized == true)
+                  _buildCameraPreview(),
+                
+                // Loading Overlay
+                if (_isLoading) _buildLoadingOverlay(),
+                
+                // Detection Overlay
+                if (_currentDetection != null && !_isLoading && _error == null)
+                  _buildDetectionOverlay(),
+                
+                // Top Controls
+                _buildTopControls(),
+                
+                // Bottom Controls
+                _buildBottomControls(),
+                
+                // Manual capture button when in interactive mode
+                _buildManualCaptureButton(),
+              ],
+            ),
     );
   }
 
   Widget _buildCameraPreview() {
     final controller = _cameraService.controller;
-    
     if (controller == null || !controller.value.isInitialized) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
+      return const SizedBox.shrink();
     }
-    
+
     return SizedBox.expand(
       child: FittedBox(
         fit: BoxFit.cover,
@@ -333,13 +466,28 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
   }
 
   Widget _buildDetectionOverlay() {
-    return CustomPaint(
-      size: Size.infinite,
-      painter: RealtimeDetectionPainter(
-        detection: _currentDetection!,
-        phase: _cameraService.currentPhase,
-        countdownSeconds: _cameraService.countdownSeconds,
-        cornerAnimation: _cornerPulseAnimation,
+    return GestureDetector(
+      onPanStart: _onPanStart,
+      onPanUpdate: _onPanUpdate,
+      onPanEnd: _onPanEnd,
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: RealtimeDetectionPainter(
+          detection: _isInteractiveMode && _adjustableCorners.isNotEmpty
+              ? EdgeDetectionResult(
+                  corners: _adjustableCorners,
+                  confidence: _currentDetection?.confidence ?? 0.0,
+                  method: 'manual_adjustment',
+                  processingTimeMs: 0,
+                  requiresManualAdjustment: false,
+                )
+              : _currentDetection!,
+          phase: _cameraService.currentPhase,
+          countdownSeconds: _cameraService.countdownSeconds,
+          cornerAnimation: _cornerPulseAnimation,
+          isInteractiveMode: _isInteractiveMode,
+          selectedCornerIndex: _selectedCornerIndex,
+        ),
       ),
     );
   }
@@ -424,6 +572,15 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
                 isActive: _isRealTimeDetectionActive,
               ),
               
+              // Interactive mode toggle
+              _buildControlButton(
+                icon: _isInteractiveMode ? Icons.auto_fix_high : Icons.edit,
+                onPressed: _currentDetection?.corners.length == 4 
+                    ? _toggleInteractiveMode 
+                    : null,
+                isActive: _isInteractiveMode,
+              ),
+              
               // Capture button
               _buildCaptureButton(),
               
@@ -436,6 +593,36 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
                 },
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManualCaptureButton() {
+    if (!_isInteractiveMode || _adjustableCorners.length != 4) {
+      return const SizedBox.shrink();
+    }
+    
+    return Positioned(
+      bottom: 120,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: ElevatedButton.icon(
+          onPressed: _isCapturing ? null : _captureWithAdjustedCorners,
+          icon: _isCapturing 
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.camera_alt),
+          label: Text(_isCapturing ? 'Capturing...' : 'Capture'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
         ),
       ),
@@ -475,7 +662,7 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
 
   Widget _buildControlButton({
     required IconData icon,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     bool isActive = false,
   }) {
     return Container(
@@ -553,7 +740,7 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
     );
   }
 
-  Widget _buildErrorOverlay() {
+  Widget _buildErrorWidget() {
     return Container(
       color: Colors.black.withOpacity(0.8),
       child: Center(
@@ -603,18 +790,22 @@ class _RealtimeCameraScreenState extends State<RealtimeCameraScreen>
   }
 }
 
-/// Custom painter for real-time detection overlay - CLEAN CORNER DOTS ONLY
+/// Custom painter for real-time detection overlay with INTERACTIVE CORNER DOTS
 class RealtimeDetectionPainter extends CustomPainter {
   final EdgeDetectionResult detection;
   final AutoCapturePhase phase;
   final double countdownSeconds;
   final Animation<double> cornerAnimation;
+  final bool isInteractiveMode;
+  final int? selectedCornerIndex;
 
   RealtimeDetectionPainter({
     required this.detection,
     required this.phase,
     required this.countdownSeconds,
     required this.cornerAnimation,
+    this.isInteractiveMode = false,
+    this.selectedCornerIndex,
   });
 
   @override
@@ -630,20 +821,53 @@ class RealtimeDetectionPainter extends CustomPainter {
     }
   }
 
-  /// Draw only clean corner dots - NO RED LINES as requested
+  /// Draw clean corner dots with interactive capabilities
   void _drawDetectedDocument(Canvas canvas, Size size) {
     final corners = detection.corners;
     final confidence = detection.confidence;
     
-    // REMOVED: No more red boundary lines - clean interface as requested
-    // Only draw corner dots without boundary lines or numbers
-    
+    // Draw interactive corner dots
     for (int i = 0; i < corners.length; i++) {
-      _drawCleanCornerDot(canvas, corners[i], confidence);
+      if (isInteractiveMode) {
+        _drawInteractiveCornerDot(canvas, corners[i], confidence, i);
+      } else {
+        _drawCleanCornerDot(canvas, corners[i], confidence);
+      }
     }
   }
 
-  /// Draw clean corner dots without numbers or red lines
+  /// Draw interactive corner dots similar to document preview screen
+  void _drawInteractiveCornerDot(Canvas canvas, Offset corner, double confidence, int index) {
+    final isSelected = selectedCornerIndex == index;
+    final baseColor = _getCornerColor(confidence);
+    final animationValue = cornerAnimation.value;
+    
+    // Draw pulsing outer ring for selected corner
+    if (isSelected) {
+      final pulseRingPaint = Paint()
+        ..color = baseColor.withOpacity(0.3)
+        ..style = PaintingStyle.fill;
+      
+      final pulseRadius = 16.0 * animationValue;
+      canvas.drawCircle(corner, pulseRadius, pulseRingPaint);
+    }
+    
+    // Draw outer circle (similar to document preview)
+    final outerPaint = Paint()
+      ..color = isSelected ? Colors.white : baseColor
+      ..style = PaintingStyle.fill;
+    
+    canvas.drawCircle(corner, isSelected ? 12 : 10, outerPaint);
+    
+    // Draw inner circle
+    final innerPaint = Paint()
+      ..color = isSelected ? baseColor : Colors.white
+      ..style = PaintingStyle.fill;
+    
+    canvas.drawCircle(corner, isSelected ? 8 : 6, innerPaint);
+  }
+
+  /// Draw clean corner dots without interaction (original implementation)
   void _drawCleanCornerDot(Canvas canvas, Offset corner, double confidence) {
     final color = _getCornerColor(confidence);
     final animationValue = cornerAnimation.value;
@@ -855,6 +1079,8 @@ class RealtimeDetectionPainter extends CustomPainter {
     return oldDelegate.detection != detection ||
            oldDelegate.phase != phase ||
            oldDelegate.countdownSeconds != countdownSeconds ||
-           oldDelegate.cornerAnimation.value != cornerAnimation.value;
+           oldDelegate.cornerAnimation.value != cornerAnimation.value ||
+           oldDelegate.isInteractiveMode != isInteractiveMode ||
+           oldDelegate.selectedCornerIndex != selectedCornerIndex;
   }
 }

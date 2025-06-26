@@ -13,6 +13,9 @@ dependencies:
 
   # UI and Icons
   cupertino_icons: ^1.0.8
+
+  # Google Sign-In (NEW - add this line)
+  google_sign_in: ^6.1.5
   
   # Firebase
   firebase_core: ^3.14.0

@@ -32,8 +32,7 @@ class _EnhancedDocumentPreviewScreenState
   bool _isManualMode = false;
   int? _selectedCornerIndex;
   
-  final EnhancedEdgeDetectionService _edgeDetectionService =
-      EnhancedEdgeDetectionService();
+  final EdgeDetectionService _edgeDetectionService = EdgeDetectionService();
   
   // Transform matrix for coordinate mapping
   late Matrix4 _imageToScreenTransform;

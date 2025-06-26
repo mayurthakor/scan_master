@@ -11,8 +11,11 @@ import 'package:scan_master/screens/chat_screen.dart';
 import 'package:scan_master/screens/document_preview_screen.dart';
 import 'package:scan_master/services/api_service.dart';
 import 'package:scan_master/services/camera_service.dart';
+import 'package:scan_master/screens/realtime_camera_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:scan_master/config/api_config.dart';
+import '../screens/realtime_camera_screen.dart';
+
 
 class UpdatedHomeScreen extends StatefulWidget {
   const UpdatedHomeScreen({super.key});
@@ -46,14 +49,14 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
 
     // Initialize camera service
     try {
-      await EnhancedCameraService.instance.initialize();
+      await CameraService.instance.initialize();
     } catch (e) {
       print('Camera initialization failed: $e');
       // Camera not available - show appropriate UI
     }
 
     // Cleanup old temporary files
-    EnhancedCameraService.instance.cleanupTempFiles();
+    CameraService.instance.cleanupTempFiles();
   }
 
   void _setupStreams() {
@@ -74,7 +77,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
   @override
   void dispose() {
     _razorpay.clear();
-    EnhancedCameraService.instance.disposeController();
+    CameraService.instance.disposeController();
     super.dispose();
   }
 
@@ -221,10 +224,12 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
 
       if (!mounted) return;
       
+      // CHANGED: Use RealtimeCameraScreen instead of previous camera
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (context) => EnhancedCameraScreen(
+          builder: (context) => RealtimeCameraScreen(
             onImageCaptured: _handleCameraCapture,
+            enableAutoCapture: true,
           ),
           fullscreenDialog: true,
         ),
@@ -236,7 +241,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
 
   Future<bool> _checkCameraAvailability() async {
     try {
-      final cameras = EnhancedCameraService.instance.cameras;
+      final cameras = CameraService.instance.cameras;
       if (cameras == null || cameras.isEmpty) {
         _showErrorDialog(
           'No camera available on this device. Please use the file upload option instead.',

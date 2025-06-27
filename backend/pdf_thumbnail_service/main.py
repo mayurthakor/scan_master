@@ -14,7 +14,7 @@ storage_client = storage.Client()
 db = firestore.Client()
 
 # Configuration
-THUMBNAIL_SIZE = (200, 280)  # Similar to Adobe Scan aspect ratio
+THUMBNAIL_SIZE = (200, 280)  # Similar to Adobe Scan aspect ratio 
 THUMBNAIL_QUALITY = 85
 BUCKET_NAME = 'scan-master-app.firebasestorage.app'
 

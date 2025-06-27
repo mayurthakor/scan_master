@@ -80,7 +80,7 @@ jobs:
                   matrix+="{\"service\":\"chat_service\",\"function_name\":\"chat-with-document\",\"entry_point\":\"chat_with_document\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
                 "conversion_service")
-                  matrix+="{\"service\":\"conversion_service\",\"service_name\":\"document-converter\",\"type\":\"run\",\"region\":\"$region\"}"
+                  matrix+="{\"service\":\"conversion_service\",\"service_name\":\"process-file-to-pdf\",\"type\":\"run\",\"region\":\"$region\"}"
                   ;;
                 "check_upload_allowance_service")
                   matrix+="{\"service\":\"check_upload_allowance_service\",\"function_name\":\"check-upload-allowance\",\"entry_point\":\"check_upload_allowance\",\"type\":\"function\",\"region\":\"$region\"}"
@@ -222,8 +222,8 @@ jobs:
       - name: Deploy Cloud Run Service
         if: matrix.type == 'run'
         run: |
-          # Generate service account email for Cloud Run
-          SERVICE_ACCOUNT="conversion-service-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+          # Use the default compute service account that works
+          SERVICE_ACCOUNT="757169597458-compute@developer.gserviceaccount.com"
           
           echo "Deploying ${{ matrix.service_name }} to ${{ matrix.region }}"
           echo "Service account: $SERVICE_ACCOUNT"

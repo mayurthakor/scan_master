@@ -115,7 +115,7 @@ def process_file_to_pdf(cloud_event):
     doc_id = metadata.get('firestoreDocId')
 
     if not doc_id:
-        print(f"Error: Missing 'firestoreDocId' in metadata for file {file_path}. Aborting.")
+        print(f"Error: Missing 'firestoreDocId' in metadata for file {file_path}. Aborting.") 
         return
 
     # ADD: Check if document exists before processing

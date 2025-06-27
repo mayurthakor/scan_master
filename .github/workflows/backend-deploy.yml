@@ -235,7 +235,6 @@ jobs:
               --source=backend/${{ matrix.service }} \
               --entry-point=${{ matrix.entry_point }} \
               --trigger-bucket=scan-master-app.firebasestorage.app \
-              --trigger-event-type=google.cloud.storage.object.v1.finalized \
               --service-account=$SERVICE_ACCOUNT
           else
             # Original HTTP trigger deployment for other services

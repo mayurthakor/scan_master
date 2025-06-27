@@ -115,6 +115,7 @@ class ApiService {
   }
 
   /// Asks a question about a document that has been prepared for chat
+  /// Asks a question about a document that has been prepared for chat
   Future<String> askQuestion(String documentId, String question) async {
     try {
       final response = await _callService('chat-with-document', {
@@ -122,13 +123,38 @@ class ApiService {
         'question': question,
       });
       
-      final answer = response['answer'] as String?;
-      if (answer == null) {
-        throw Exception('Failed to get answer from response.');
+      // Add debug logging to see the actual response structure
+      print('🔍 Chat response structure: $response');
+      print('🔍 Response keys: ${response.keys.toList()}');
+      
+      // Check if response has error first
+      if (response.containsKey('error')) {
+        final error = response['error'] as Map<String, dynamic>;
+        throw Exception('Backend error: ${error['message']}');
       }
-      return answer;
+      
+      // Try to get answer from data object first (like other services)
+      if (response.containsKey('data')) {
+        final data = response['data'] as Map<String, dynamic>?;
+        if (data != null && data.containsKey('answer')) {
+          final answer = data['answer'] as String?;
+          if (answer != null && answer.isNotEmpty) {
+            return answer;
+          }
+        }
+      }
+      
+      // Fallback: try to get answer directly from response
+      final directAnswer = response['answer'] as String?;
+      if (directAnswer != null && directAnswer.isNotEmpty) {
+        return directAnswer;
+      }
+      
+      // If we get here, the response format is unexpected
+      throw Exception('Invalid response format: ${response.toString()}');
       
     } catch (e) {
+      print('❌ Error in askQuestion: $e');
       throw Exception('Failed to get answer: $e');
     }
   }

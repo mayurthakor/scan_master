@@ -1,4 +1,4 @@
-# backend/pdf_thumbnail_service/main.py
+# backend/pdf_thumbnail_service/main.py 
 
 import os
 import tempfile

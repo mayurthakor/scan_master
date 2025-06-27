@@ -224,17 +224,33 @@ jobs:
           echo "Service account: $SERVICE_ACCOUNT"
           echo "Environment variables: $ENV_VARS"
           
-          gcloud functions deploy ${{ matrix.function_name }} \
-            --gen2 \
-            --runtime=python311 \
-            --project=$PROJECT_ID \
-            --region=${{ matrix.region }} \
-            --source=backend/${{ matrix.service }} \
-            --entry-point=${{ matrix.entry_point }} \
-            --trigger-http \
-            --allow-unauthenticated \
-            --service-account=$SERVICE_ACCOUNT \
-            $ENV_VARS
+          # Special deployment for pdf_thumbnail_service (uses Cloud Storage trigger)
+          if [ "${{ matrix.service }}" = "pdf_thumbnail_service" ]; then
+            echo "Deploying ${{ matrix.function_name }} with Cloud Storage trigger"
+            gcloud functions deploy ${{ matrix.function_name }} \
+              --gen2 \
+              --runtime=python311 \
+              --project=$PROJECT_ID \
+              --region=${{ matrix.region }} \
+              --source=backend/${{ matrix.service }} \
+              --entry-point=${{ matrix.entry_point }} \
+              --trigger-bucket=scan-master-app.firebasestorage.app \
+              --trigger-event-type=google.cloud.storage.object.v1.finalized \
+              --service-account=$SERVICE_ACCOUNT
+          else
+            # Original HTTP trigger deployment for other services
+            gcloud functions deploy ${{ matrix.function_name }} \
+              --gen2 \
+              --runtime=python311 \
+              --project=$PROJECT_ID \
+              --region=${{ matrix.region }} \
+              --source=backend/${{ matrix.service }} \
+              --entry-point=${{ matrix.entry_point }} \
+              --trigger-http \
+              --allow-unauthenticated \
+              --service-account=$SERVICE_ACCOUNT \
+              $ENV_VARS
+          fi
       
       - name: Deploy Cloud Run Service
         if: matrix.type == 'run'

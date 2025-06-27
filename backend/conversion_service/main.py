@@ -11,7 +11,7 @@ import functions_framework
 
 # Initialize Google Cloud clients
 storage_client = storage.Client()
-vision_client = vision.ImageAnnotatorClient()
+vision_client = vision.ImageAnnotatorClient() 
 db = firestore.Client()
 
 

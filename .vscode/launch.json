@@ -1,0 +1,28 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "scan_master",
+            "cwd": "scan_master",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "scan_master (profile mode)",
+            "cwd": "scan_master",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "scan_master (release mode)",
+            "cwd": "scan_master",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        }
+    ]
+}

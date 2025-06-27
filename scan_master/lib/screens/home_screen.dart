@@ -14,11 +14,11 @@ import 'package:scan_master/services/camera_service.dart';
 import 'package:scan_master/screens/realtime_camera_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:scan_master/config/api_config.dart';
-import '../screens/realtime_camera_screen.dart';
-
 
 class UpdatedHomeScreen extends StatefulWidget {
-  const UpdatedHomeScreen({super.key});
+  final VoidCallback? onSignOut;
+  
+  const UpdatedHomeScreen({super.key, this.onSignOut});
   
   @override
   State<UpdatedHomeScreen> createState() => _UpdatedHomeScreenState();
@@ -81,7 +81,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     super.dispose();
   }
 
-  // Existing methods remain the same...
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
     if (!mounted) return;
     showDialog(
@@ -125,7 +124,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     print('EXTERNAL_WALLET: ${response.walletName}');
   }
 
-  // NEW: Enhanced upload handling with scanner integration
   Future<void> _showUploadOptions() async {
     showModalBottomSheet(
       context: context,
@@ -214,7 +212,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     );
   }
 
-  // NEW: Document scanner integration
   Future<void> _openDocumentScanner() async {
     try {
       // Check camera permissions and availability
@@ -224,7 +221,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
 
       if (!mounted) return;
       
-      // CHANGED: Use RealtimeCameraScreen instead of previous camera
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => RealtimeCameraScreen(
@@ -257,7 +253,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     }
   }
 
-  // NEW: Handle camera capture and preview
   Future<void> _handleCameraCapture(String imagePath) async {
     if (!mounted) return;
     
@@ -271,7 +266,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     );
   }
 
-  // NEW: Handle processed document from scanner
   Future<void> _handleProcessedDocument(String processedImagePath) async {
     try {
       await _uploadScannedDocument(processedImagePath);
@@ -280,7 +274,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     }
   }
 
-  // NEW: Upload scanned document
   Future<void> _uploadScannedDocument(String imagePath) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -302,7 +295,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     final SettableMetadata metadata = SettableMetadata(
       customMetadata: <String, String>{
         'firestoreDocId': docRef.id,
-        'source': 'scanner', // Mark as scanned document
+        'source': 'scanner',
       },
     );
 
@@ -359,34 +352,32 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
   }
 
   Future<bool> _checkUploadAllowance() async {
-  try {
-    if (ApiConfig.enableDebugLogs) {
-      print('🔍 Checking upload allowance...');
+    try {
+      if (ApiConfig.enableDebugLogs) {
+        print('🔍 Checking upload allowance...');
+      }
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      final result = await ApiService.instance.checkUploadAllowance(user.uid);
+          
+      final isAllowed = result;
+      
+      if (ApiConfig.enableDebugLogs) {
+        print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
+      }
+      
+      return isAllowed;
+      
+    } catch (e) {
+      if (ApiConfig.enableDebugLogs) {
+        print('🚨 Upload allowance check failed: $e');
+      }
+      
+      print('⚠️ Upload allowance check failed, allowing upload: $e');
+      return true;
     }
-    
-    // NEW: Use enhanced API service with automatic fallback
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false; // or handle appropriately
-    final result = await ApiService.instance.checkUploadAllowance(user.uid);
-        
-    final isAllowed = result;
-    
-    if (ApiConfig.enableDebugLogs) {
-      print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
-    }
-    
-    return isAllowed;
-    
-  } catch (e) {
-    if (ApiConfig.enableDebugLogs) {
-      print('🚨 Upload allowance check failed: $e');
-    }
-    
-    // Graceful degradation: allow upload if check fails
-    print('⚠️ Upload allowance check failed, allowing upload: $e');
-    return true;
   }
-}
 
   void _showLimitReachedDialog() {
     showDialog(
@@ -429,7 +420,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     );
   }
 
-  // Existing methods for file upload, chat preparation, etc.
   Future<void> _handleUploadAttempt() async {
     final bool isAllowed = await _checkUploadAllowance();
     if (isAllowed) {
@@ -498,7 +488,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     }
   }
 
-  // Rest of the existing methods (chat preparation, payment, etc.)
   Future<void> _initiateChatPreparation(String documentId) async {
     setState(() {
       _isPreparingChat[documentId] = true;
@@ -597,7 +586,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
     );
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return; // or handle appropriately
+      if (user == null) return;
       final result = await ApiService.instance.createSubscriptionOrder(user.uid);
       
       if (!mounted) return;
@@ -610,7 +599,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
         'name': 'Scan Master',
         'order_id': orderData['orderId'],
         'description': 'Premium Subscription',
-        'prefill': {'email': user?.email ?? ''}
+        'prefill': {'email': user.email ?? ''}
       };
       _razorpay.open(options);
     } catch (e) {
@@ -630,7 +619,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      // Get the download URL directly (it returns a String, not a Map)
       final String url = await ApiService.instance.getDownloadUrl(documentId);
       
       if (!mounted) return;
@@ -679,7 +667,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      // NEW: Use enhanced API service with automatic fallback
       await ApiService.instance.deleteFile(documentId);
       
       if (!mounted) return;
@@ -812,7 +799,7 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
               IconButton(
                 icon: const Icon(Icons.logout),
                 tooltip: 'Logout',
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: widget.onSignOut ?? () => FirebaseAuth.instance.signOut(),
               ),
               if (isSubscribed)
                 const Padding(

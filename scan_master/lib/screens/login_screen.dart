@@ -42,20 +42,43 @@ class _LoginScreenState extends State<LoginScreen> {
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
+        // Login successful - navigation handled by AuthGate
       } else {
+        // Signup mode
         await _authService.createUserWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
+        
+        // Send verification email
+        await _authService.sendEmailVerification();
+        
+        // Navigate to email verification screen
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/email-verification');
+        }
       }
     } on FirebaseAuthException catch (error) {
       String errorMessage = 'An error occurred, please check your credentials.';
-      if (error.message != null) {
+      
+      if (error.code == 'email-not-verified') {
+        errorMessage = 'Please verify your email before signing in.';
+        // Show option to go to verification screen
+        if (mounted) {
+          _showEmailNotVerifiedDialog();
+        }
+        return;
+      } else if (error.message != null) {
         errorMessage = error.message!;
       }
-      _showErrorSnackBar(errorMessage);
+      
+      if (mounted) {
+        _showErrorSnackBar(errorMessage);
+      }
     } catch (error) {
-      _showErrorSnackBar('An unexpected error occurred.');
+      if (mounted) {
+        _showErrorSnackBar('An unexpected error occurred.');
+      }
     }
 
     if (mounted) {
@@ -75,10 +98,15 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _authService.signInWithGoogle();
       if (result == null) {
         // User cancelled the sign-in
-        _showErrorSnackBar('Sign-in was cancelled.');
+        if (mounted) {
+          _showErrorSnackBar('Sign-in was cancelled.');
+        }
       }
+      // Google sign-in successful - navigation handled by AuthGate
     } catch (error) {
-      _showErrorSnackBar('Failed to sign in with Google: ${error.toString()}');
+      if (mounted) {
+        _showErrorSnackBar('Failed to sign in with Google: ${error.toString()}');
+      }
     }
 
     if (mounted) {
@@ -89,10 +117,39 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
+  }
+
+  void _showEmailNotVerifiedDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Email Not Verified'),
+        content: const Text('Please verify your email before signing in. Would you like to go to the verification screen?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              if (mounted) {
+                Navigator.of(context).pushReplacementNamed('/email-verification');
+              }
+            },
+            child: const Text('Verify Email'),
+          ),
+        ],
       ),
     );
   }

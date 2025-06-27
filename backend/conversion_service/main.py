@@ -118,13 +118,26 @@ def process_file_to_pdf(cloud_event):
         print(f"Error: Missing 'firestoreDocId' in metadata for file {file_path}. Aborting.")
         return
 
+    # ADD: Check if document exists before processing
+    doc_ref = db.collection('files').document(doc_id)
+    try:
+        doc_snapshot = doc_ref.get()
+        if not doc_snapshot.exists:
+            print(f"Document {doc_id} no longer exists, skipping processing")
+            return
+    except Exception as check_error:
+        print(f"Error checking document existence for {doc_id}: {check_error}")
+        return
+
     file_name_only = os.path.basename(file_path)
     _, file_extension = os.path.splitext(file_name_only)
     handler = FILE_HANDLERS.get(file_extension.lower())
     
     if not handler:
-        doc_ref = db.collection('files').document(doc_id)
-        doc_ref.update({'status': 'Unsupported file type'})
+        try:
+            doc_ref.update({'status': 'Unsupported file type'})
+        except Exception as update_error:
+            print(f"Could not update document {doc_id} (unsupported type): {update_error}")
         return
 
     print(f"Processing file: {file_path} for document ID: {doc_id} using handler: {handler.__name__}")
@@ -143,16 +156,21 @@ def process_file_to_pdf(cloud_event):
         destination_blob = source_bucket.blob(destination_blob_name)
         destination_blob.upload_from_file(pdf_buffer, content_type='application/pdf')
 
-        doc_ref = db.collection('files').document(doc_id)
-        doc_ref.update({
-            'status': 'Completed',
-            'pdfPath': destination_blob_name,
-            'processedTimestamp': firestore.SERVER_TIMESTAMP
-        })
+        try:
+            doc_ref.update({
+                'status': 'Completed',
+                'pdfPath': destination_blob_name,
+                'processedTimestamp': firestore.SERVER_TIMESTAMP
+            })
+        except Exception as update_error:
+            print(f"Could not update document {doc_id} with completion status: {update_error}")
+            
     except Exception as e:
         print(f"An error occurred during processing of {file_path}: {e}")
-        doc_ref = db.collection('files').document(doc_id)
-        doc_ref.update({'status': 'Error', 'errorMessage': str(e)})
+        try:
+            doc_ref.update({'status': 'Error', 'errorMessage': str(e)})
+        except Exception as update_error:
+            print(f"Could not update document {doc_id} with error status: {update_error}")
     finally:
         if os.path.exists(temp_download_path):
             os.remove(temp_download_path)

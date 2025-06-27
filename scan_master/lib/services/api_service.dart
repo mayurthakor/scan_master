@@ -91,12 +91,24 @@ class ApiService {
         'documentId': documentId,
       });
 
-      final summary = response['summary'] as String?;
+      // Check if response has error
+      if (response.containsKey('error')) {
+        final error = response['error'] as Map<String, dynamic>;
+        throw Exception('Backend error: ${error['message']}');
+      }
+
+      // Get summary from data object
+      final data = response['data'] as Map<String, dynamic>?;
+      if (data == null) {
+        throw Exception('Invalid response format: missing data object');
+      }
+
+      final summary = data['summary'] as String?;
       if (summary == null) {
         throw Exception('Failed to get summary from response.');
       }
+      
       return summary;
-
     } catch (e) {
       throw Exception('Failed to prepare chat session: $e');
     }
@@ -228,17 +240,29 @@ class ApiService {
     }
   }
 
-  /// Get download URL for a file
   Future<String> getDownloadUrl(String documentId) async {
     try {
       final response = await _callService('get-download-url', {
         'documentId': documentId,
       });
       
-      final url = response['url'] as String?;
+      // Check if response has error
+      if (response.containsKey('error')) {
+        final error = response['error'] as Map<String, dynamic>;
+        throw Exception('Backend error: ${error['message']}');
+      }
+      
+      // Get URL from result object
+      final result = response['result'] as Map<String, dynamic>?;
+      if (result == null) {
+        throw Exception('Invalid response format: missing result object');
+      }
+      
+      final url = result['url'] as String?;
       if (url == null) {
         throw Exception('Failed to get download URL from response.');
       }
+      
       return url;
     } catch (e) {
       throw Exception('Failed to get download URL: $e');

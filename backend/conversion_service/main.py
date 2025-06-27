@@ -153,7 +153,7 @@ def process_file_to_pdf(cloud_event):
         user_id = file_path.split('/')[1]
         destination_blob_name = f"processed/{user_id}/{new_pdf_name}"
         
-        destination_blob = source_bucket.blob(destination_blob_name)
+        destination_blob = source_bucket.blob(destination_blob_name) 
 
         # Add metadata for thumbnail service to read
         destination_blob.metadata = {'firestoreDocId': doc_id}

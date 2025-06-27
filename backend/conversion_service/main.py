@@ -104,7 +104,7 @@ def process_file_to_pdf(cloud_event):
     file_path = data['name']
     
     if 'processed/' in file_path or not file_path.startswith('uploads/'):
-        print(f"Ignoring file: {file_path}") 
+        print(f"Ignoring file: {file_path}")
         return
 
     source_bucket = storage_client.bucket(bucket_name)

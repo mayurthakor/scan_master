@@ -65,7 +65,14 @@ jobs:
           first=true
           
           for service in "${changed_services[@]}"; do
-            for region in "us-central1" "asia-south1" "europe-west1"; do
+            # For conversion_service, only deploy to us-central1
+            if [ "$service" = "conversion_service" ]; then
+              regions=("us-central1")
+            else
+              regions=("us-central1" "asia-south1" "europe-west1")
+            fi
+            
+            for region in "${regions[@]}"; do
               if [ "$first" = true ]; then
                 first=false
               else

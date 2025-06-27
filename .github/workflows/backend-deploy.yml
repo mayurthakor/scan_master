@@ -44,6 +44,10 @@ jobs:
             changed_services+=("check_upload_allowance_service")
           fi
           
+          if git diff HEAD~1 --name-only | grep -q "backend/pdf_thumbnail_service/"; then
+            changed_services+=("pdf_thumbnail_service")
+          fi
+
           if git diff HEAD~1 --name-only | grep -q "backend/delete_file_service/"; then
             changed_services+=("delete_file_service")
           fi
@@ -92,6 +96,9 @@ jobs:
                 "check_upload_allowance_service")
                   matrix+="{\"service\":\"check_upload_allowance_service\",\"function_name\":\"check-upload-allowance\",\"entry_point\":\"check_upload_allowance\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
+                "pdf_thumbnail_service")
+                  matrix+="{\"service\":\"pdf_thumbnail_service\",\"function_name\":\"generate-pdf-thumbnail\",\"entry_point\":\"generate_pdf_thumbnail\",\"type\":\"function\",\"region\":\"$region\"}"
+                  ;;  
                 "delete_file_service")
                   matrix+="{\"service\":\"delete_file_service\",\"function_name\":\"delete-file\",\"entry_point\":\"delete_file\",\"type\":\"function\",\"region\":\"$region\"}"
                   ;;
@@ -164,6 +171,9 @@ jobs:
             "check_upload_allowance_service")
               SERVICE_ACCOUNT="check-upload-allowance-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
               ;;
+            "pdf_thumbnail_service")
+              SERVICE_ACCOUNT="pdf-thumbnail-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
+              ;;  
             "delete_file_service")
               SERVICE_ACCOUNT="delete-file-sa@${{ secrets.GCLOUD_PROJECT_ID }}.iam.gserviceaccount.com"
               ;;

@@ -21,7 +21,7 @@ BUCKET_NAME = 'scan-master-app.firebasestorage.app'
 @functions_framework.http
 def generate_pdf_thumbnail(request):
     """
-    Cloud Function to generate PDF thumbnails
+    Cloud Function to generate PDF thumbnails 
     Triggered after PDF conversion is complete
     """
     headers = {

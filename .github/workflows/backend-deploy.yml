@@ -69,8 +69,8 @@ jobs:
           first=true
           
           for service in "${changed_services[@]}"; do
-            # For conversion_service, only deploy to us-central1
-            if [ "$service" = "conversion_service" ]; then
+            # For conversion_service and pdf_thumbnail_service, only deploy to us-central1
+            if [ "$service" = "conversion_service" ] || [ "$service" = "pdf_thumbnail_service" ]; then
               regions=("us-central1")
             else
               regions=("us-central1" "asia-south1" "europe-west1")

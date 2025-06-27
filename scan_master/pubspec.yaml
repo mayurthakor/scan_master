@@ -44,6 +44,9 @@ dependencies:
   
   # Payment
   razorpay_flutter: ^1.4.0
+
+  cached_network_image: ^3.3.0    # For efficient thumbnail loading
+  shimmer: ^3.0.0                 # For loading animations
   
   # Math and Vectors (NEW - for image transformations)
   vector_math: ^2.1.4

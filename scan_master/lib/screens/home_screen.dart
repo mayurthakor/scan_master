@@ -14,6 +14,8 @@ import 'package:scan_master/services/camera_service.dart';
 import 'package:scan_master/screens/realtime_camera_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:scan_master/config/api_config.dart';
+import 'package:cached_network_image/cached_network_image.dart';  // NEW IMPORT
+import 'package:shimmer/shimmer.dart';  // NEW IMPORT
 
 class UpdatedHomeScreen extends StatefulWidget {
   final VoidCallback? onSignOut;
@@ -122,6 +124,275 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
 
   void _handleExternalWallet(ExternalWalletResponse response) {
     print('EXTERNAL_WALLET: ${response.walletName}');
+  }
+
+  Future<void> _navigateToChat(String documentId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('files')
+          .doc(documentId)
+          .get();
+      
+      if (!doc.exists) {
+        throw Exception('Document not found');
+      }
+      
+      final data = doc.data()!;
+      final summary = data['summary'] ?? "Summary not found.";
+      final fileName = data['originalFileName'] ?? "Unknown file";
+
+      if (!mounted) return;
+      
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(
+            documentId: documentId,
+            fileName: fileName,
+            initialSummary: summary,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open chat: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _createSubscriptionOrder() async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final result = await ApiService.instance.createSubscriptionOrder(user.uid);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      
+      final orderData = Map<String, dynamic>.from(result);
+      final options = {
+        'key': orderData['razorpayKeyId'],
+        'amount': orderData['amount'],
+        'name': 'Scan Master',
+        'order_id': orderData['orderId'],
+        'description': 'Premium Subscription',
+        'prefill': {'email': user.email ?? ''}
+      };
+      _razorpay.open(options);
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('An unexpected error occurred.')),
+      );
+    }
+  }
+
+  Future<void> _initiateChatPreparation(String documentId) async {
+    setState(() {
+      _isPreparingChat[documentId] = true;
+    });
+
+    await FirebaseFirestore.instance
+        .collection('files')
+        .doc(documentId)
+        .update({'chatStatus': 'preparing'});
+
+    try {
+      final summary = await _apiService.prepareChatSession(documentId);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Document is ready for chat!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      print("Chat preparation successful. Summary length: ${summary.length} characters");
+    } catch (e) {
+      print("Error preparing chat: $e");
+      
+      try {
+        await FirebaseFirestore.instance
+            .collection('files')
+            .doc(documentId)
+            .update({'chatStatus': 'failed'});
+      } catch (updateError) {
+        print("Failed to update document status: $updateError");
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to prepare document for chat: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPreparingChat.remove(documentId);
+        });
+      }
+    }
+  }
+
+  Future<bool> _checkUploadAllowance() async {
+    try {
+      if (ApiConfig.enableDebugLogs) {
+        print('🔍 Checking upload allowance...');
+      }
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      final result = await ApiService.instance.checkUploadAllowance(user.uid);
+          
+      final isAllowed = result;
+      
+      if (ApiConfig.enableDebugLogs) {
+        print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
+      }
+      
+      return isAllowed;
+      
+    } catch (e) {
+      if (ApiConfig.enableDebugLogs) {
+        print('🚨 Upload allowance check failed: $e');
+      }
+      
+      print('⚠️ Upload allowance check failed, allowing upload: $e');
+      return true;
+    }
+  }
+
+  void _showLimitReachedDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Weekly Limit Reached'),
+        content: const Text(
+          'You have reached your free weekly limit of 5 uploads. Please subscribe for unlimited uploads.',
+        ),
+        actions: [
+          TextButton(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          ElevatedButton(
+            child: const Text('Subscribe'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _createSubscriptionOrder();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Error'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleUploadAttempt() async {
+    final bool isAllowed = await _checkUploadAllowance();
+    if (isAllowed) {
+      _startFilePickerAndUpload();
+    } else {
+      _showLimitReachedDialog();
+    }
+  }
+
+  Future<void> _startFilePickerAndUpload() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'txt', 'docx', 'csv', 'xlsx', 'pptx'],
+    );
+    if (result == null) return;
+
+    final PlatformFile pickedFile = result.files.first;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final DocumentReference docRef =
+        FirebaseFirestore.instance.collection('files').doc();
+    
+    final String fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${pickedFile.name}';
+    final String storagePath = 'uploads/${user.uid}/$fileName';
+    
+    final SettableMetadata metadata = SettableMetadata(
+      customMetadata: <String, String>{
+        'firestoreDocId': docRef.id,
+      },
+    );
+
+    final Reference storageRef =
+        FirebaseStorage.instance.ref().child(storagePath);
+    final fileToUpload = File(pickedFile.path!);
+    final uploadTask = storageRef.putFile(fileToUpload, metadata);
+
+    setState(() {
+      _uploadTask = uploadTask;
+    });
+
+    try {
+      await docRef.set({
+        'userId': user.uid,
+        'originalFileName': pickedFile.name,
+        'storagePath': storagePath,
+        'uploadTimestamp': FieldValue.serverTimestamp(),
+        'status': 'Uploaded',
+        'source': 'upload',
+      });
+
+      await uploadTask;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('File uploaded successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on FirebaseException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload Failed: ${e.message}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadTask = null;
+        });
+      }
+    }
   }
 
   Future<void> _showUploadOptions() async {
@@ -332,14 +603,13 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Document scanned and uploaded successfully!'),
-            backgroundColor: Colors.green,
           ),
         );
       }
-    } on FirebaseException catch (e) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload Failed: ${e.message}')),
+          SnackBar(content: Text('Upload failed: $e')),
         );
       }
     } finally {
@@ -348,266 +618,6 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
           _uploadTask = null;
         });
       }
-    }
-  }
-
-  Future<bool> _checkUploadAllowance() async {
-    try {
-      if (ApiConfig.enableDebugLogs) {
-        print('🔍 Checking upload allowance...');
-      }
-      
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
-      final result = await ApiService.instance.checkUploadAllowance(user.uid);
-          
-      final isAllowed = result;
-      
-      if (ApiConfig.enableDebugLogs) {
-        print('📋 Upload allowance result: ${isAllowed ? "✅ Allowed" : "❌ Denied"}');
-      }
-      
-      return isAllowed;
-      
-    } catch (e) {
-      if (ApiConfig.enableDebugLogs) {
-        print('🚨 Upload allowance check failed: $e');
-      }
-      
-      print('⚠️ Upload allowance check failed, allowing upload: $e');
-      return true;
-    }
-  }
-
-  void _showLimitReachedDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Weekly Limit Reached'),
-        content: const Text(
-          'You have reached your free weekly limit of 5 uploads. Please subscribe for unlimited uploads.',
-        ),
-        actions: [
-          TextButton(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          ElevatedButton(
-            child: const Text('Subscribe'),
-            onPressed: () {
-              Navigator.of(context).pop();
-              _createSubscriptionOrder();
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Error'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleUploadAttempt() async {
-    final bool isAllowed = await _checkUploadAllowance();
-    if (isAllowed) {
-      _startFilePickerAndUpload();
-    } else {
-      _showLimitReachedDialog();
-    }
-  }
-
-  Future<void> _startFilePickerAndUpload() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'txt', 'docx', 'csv', 'xlsx', 'pptx'],
-    );
-    if (result == null) return;
-
-    final PlatformFile pickedFile = result.files.first;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final DocumentReference docRef =
-        FirebaseFirestore.instance.collection('files').doc();
-    
-    final String fileName =
-        '${DateTime.now().millisecondsSinceEpoch}_${pickedFile.name}';
-    final String storagePath = 'uploads/${user.uid}/$fileName';
-    
-    final SettableMetadata metadata = SettableMetadata(
-      customMetadata: <String, String>{
-        'firestoreDocId': docRef.id,
-      },
-    );
-
-    final Reference storageRef =
-        FirebaseStorage.instance.ref().child(storagePath);
-    final fileToUpload = File(pickedFile.path!);
-    final uploadTask = storageRef.putFile(fileToUpload, metadata);
-
-    setState(() {
-      _uploadTask = uploadTask;
-    });
-
-    try {
-      await docRef.set({
-        'userId': user.uid,
-        'originalFileName': pickedFile.name,
-        'storagePath': storagePath,
-        'uploadTimestamp': FieldValue.serverTimestamp(),
-        'status': 'Uploaded',
-        'source': 'upload',
-      });
-
-      await uploadTask;
-    } on FirebaseException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload Failed: ${e.message}')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _uploadTask = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _initiateChatPreparation(String documentId) async {
-    setState(() {
-      _isPreparingChat[documentId] = true;
-    });
-
-    await FirebaseFirestore.instance
-        .collection('files')
-        .doc(documentId)
-        .update({'chatStatus': 'preparing'});
-
-    try {
-      final summary = await _apiService.prepareChatSession(documentId);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Document is ready for chat!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-      
-      print("Chat preparation successful. Summary length: ${summary.length} characters");
-    } catch (e) {
-      print("Error preparing chat: $e");
-      
-      try {
-        await FirebaseFirestore.instance
-            .collection('files')
-            .doc(documentId)
-            .update({'chatStatus': 'failed'});
-      } catch (updateError) {
-        print("Failed to update document status: $updateError");
-      }
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to prepare document for chat: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isPreparingChat.remove(documentId);
-        });
-      }
-    }
-  }
-
-  Future<void> _navigateToChat(String documentId) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('files')
-          .doc(documentId)
-          .get();
-      
-      if (!doc.exists) {
-        throw Exception('Document not found');
-      }
-      
-      final data = doc.data()!;
-      final summary = data['summary'] ?? "Summary not found.";
-      final fileName = data['originalFileName'] ?? "Unknown file";
-
-      if (!mounted) return;
-      
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => ChatScreen(
-            documentId: documentId,
-            fileName: fileName,
-            initialSummary: summary,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open chat: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _createSubscriptionOrder() async {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-      final result = await ApiService.instance.createSubscriptionOrder(user.uid);
-      
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      
-      final orderData = Map<String, dynamic>.from(result);
-      final options = {
-        'key': orderData['razorpayKeyId'],
-        'amount': orderData['amount'],
-        'name': 'Scan Master',
-        'order_id': orderData['orderId'],
-        'description': 'Premium Subscription',
-        'prefill': {'email': user.email ?? ''}
-      };
-      _razorpay.open(options);
-    } catch (e) {
-      if (!mounted) return;
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('An unexpected error occurred.')),
-      );
     }
   }
 
@@ -924,22 +934,12 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
                             vertical: 4,
                           ),
                           child: ListTile(
-                            leading: Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: isCompleted 
-                                    ? Colors.green.shade50 
-                                    : Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                isCompleted
-                                    ? Icons.picture_as_pdf
-                                    : _getIconForFile(originalFileName, source),
-                                color: isCompleted ? Colors.green : Colors.blue,
-                                size: 28,
-                              ),
+                            leading: _buildDocumentThumbnail(
+                              isCompleted: isCompleted,
+                              hasThumbnail: fileData['hasThumbnail'] == true,
+                              thumbnailUrl: fileData['thumbnailUrl'] as String?,
+                              originalFileName: originalFileName,
+                              source: source,
                             ),
                             title: Text(
                               displayName,
@@ -1003,6 +1003,97 @@ class _UpdatedHomeScreenState extends State<UpdatedHomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  // NEW METHOD: Build document thumbnail with proper fallbacks
+  Widget _buildDocumentThumbnail({
+    required bool isCompleted,
+    required bool hasThumbnail,
+    String? thumbnailUrl,
+    required String originalFileName,
+    String? source,
+  }) {
+    const thumbnailSize = 60.0;
+    const thumbnailHeight = 84.0; // 200:280 aspect ratio scaled down
+
+    if (isCompleted && hasThumbnail && thumbnailUrl != null) {
+      // Show actual PDF thumbnail
+      return Container(
+        width: thumbnailSize,
+        height: thumbnailHeight,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300, width: 1),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: CachedNetworkImage(
+            imageUrl: thumbnailUrl,
+            fit: BoxFit.cover,
+            placeholder: (context, url) => _buildThumbnailPlaceholder(),
+            errorWidget: (context, url, error) => _buildFallbackIcon(isCompleted, originalFileName, source),
+          ),
+        ),
+      );
+    } else if (isCompleted && !hasThumbnail) {
+      // PDF is ready but thumbnail is still generating
+      return Container(
+        width: thumbnailSize,
+        height: thumbnailHeight,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300, width: 1),
+        ),
+        child: _buildThumbnailPlaceholder(),
+      );
+    } else {
+      // Document not completed yet or no thumbnail - show icon
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: isCompleted ? Colors.green.shade50 : Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          isCompleted ? Icons.picture_as_pdf : _getIconForFile(originalFileName, source),
+          color: isCompleted ? Colors.green : Colors.blue,
+          size: 28,
+        ),
+      );
+    }
+  }
+
+  // NEW METHOD: Build shimmer loading placeholder
+  Widget _buildThumbnailPlaceholder() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey.shade300,
+      highlightColor: Colors.grey.shade100,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: const Center(
+          child: Icon(Icons.picture_as_pdf, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+
+  // NEW METHOD: Build fallback icon for failed thumbnail loads
+  Widget _buildFallbackIcon(bool isCompleted, String originalFileName, String? source) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isCompleted ? Colors.green.shade50 : Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Icon(
+        isCompleted ? Icons.picture_as_pdf : _getIconForFile(originalFileName, source),
+        color: isCompleted ? Colors.green : Colors.blue,
+        size: 20,
+      ),
     );
   }
 }

@@ -103,7 +103,12 @@ def process_file_to_pdf(cloud_event):
     bucket_name = data['bucket']
     file_path = data['name']
     
-    if 'processed/' in file_path or not file_path.startswith('uploads/'):
+    if (
+        'processed/' in file_path or 
+        'thumbnails/' in file_path or  # Ignore thumbnail uploads
+        not file_path.startswith('uploads/') or
+        file_path.endswith('.pdf')  # Ignore PDF uploads (already converted)
+    ):
         print(f"Ignoring file: {file_path}")
         return
 

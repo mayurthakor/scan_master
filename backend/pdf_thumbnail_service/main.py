@@ -18,83 +18,123 @@ THUMBNAIL_SIZE = (200, 280)  # Similar to Adobe Scan aspect ratio
 THUMBNAIL_QUALITY = 85
 BUCKET_NAME = 'scan-master-app.firebasestorage.app'
 
-@functions_framework.http
-def generate_pdf_thumbnail(request):
+@functions_framework.cloud_event
+def generate_pdf_thumbnail(cloud_event):
     """
-    Cloud Function to generate PDF thumbnails 
-    Triggered after PDF conversion is complete
+    Cloud Function triggered by Cloud Storage events
+    Generates thumbnails when PDFs are uploaded to processed/ folder
     """
-    headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }
-    
-    if request.method == 'OPTIONS':
-        return ('', 204, headers)
+    print(f"🚀 PDF Thumbnail Service triggered!")
+    print(f"📁 Event data: {cloud_event.data}")
     
     try:
-        data = request.get_json()
-        document_id = data.get('documentId')
-        pdf_url = data.get('pdfUrl')  # Firebase Storage URL
+        # Extract file information from Cloud Storage event
+        data = cloud_event.data
+        bucket_name = data['bucket']
+        file_name = data['name']
         
-        if not document_id or not pdf_url:
-            return (jsonify({'error': 'Missing documentId or pdfUrl'}), 400, headers)
+        print(f"📂 Bucket: {bucket_name}")
+        print(f"📄 File: {file_name}")
         
-        print(f"Generating thumbnail for document: {document_id}")
+        # Only process PDF files in the processed/ folder
+        if not file_name.startswith('processed/') or not file_name.endswith('.pdf'):
+            print(f"⏭️ Ignoring file: {file_name} (not a processed PDF)")
+            return
+        
+        print(f"✅ Processing PDF: {file_name}")
+        
+        # Extract document ID from file path
+        # Expected format: processed/userId/timestamp_filename.pdf
+        path_parts = file_name.split('/')
+        if len(path_parts) < 3:
+            print(f"❌ Invalid file path format: {file_name}")
+            return
+            
+        # Get document ID from Firestore metadata or filename
+        document_id = _extract_document_id_from_filename(file_name)
+        if not document_id:
+            print(f"❌ Could not extract document ID from: {file_name}")
+            return
+        
+        print(f"🎯 Document ID: {document_id}")
         
         # Download PDF from Firebase Storage
-        pdf_blob_path = _extract_blob_path_from_url(pdf_url)
-        bucket = storage_client.bucket(BUCKET_NAME)
-        pdf_blob = bucket.blob(pdf_blob_path)
+        bucket = storage_client.bucket(bucket_name)
+        pdf_blob = bucket.blob(file_name)
         
         # Download PDF to temporary file
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+            print(f"⬇️ Downloading PDF...")
             pdf_blob.download_to_filename(temp_pdf.name)
             temp_pdf_path = temp_pdf.name
+            print(f"📁 Downloaded to: {temp_pdf_path}")
         
         try:
             # Generate thumbnail from first page of PDF
+            print(f"🎨 Generating thumbnail...")
             thumbnail_data = _generate_thumbnail_from_pdf(temp_pdf_path)
             
             # Upload thumbnail to Firebase Storage
+            print(f"☁️ Uploading thumbnail...")
             thumbnail_url = _upload_thumbnail_to_storage(document_id, thumbnail_data)
             
             # Update Firestore document with thumbnail URL
+            print(f"💾 Updating Firestore...")
             _update_document_with_thumbnail(document_id, thumbnail_url)
             
-            print(f"Successfully generated thumbnail for {document_id}")
-            return (jsonify({
-                'success': True,
-                'thumbnailUrl': thumbnail_url,
-                'documentId': document_id
-            }), 200, headers)
+            print(f"🎉 Successfully generated thumbnail for {document_id}")
+            print(f"🔗 Thumbnail URL: {thumbnail_url}")
             
         finally:
             # Cleanup temporary file
             if os.path.exists(temp_pdf_path):
                 os.unlink(temp_pdf_path)
+                print(f"🗑️ Cleaned up temporary file")
                 
     except Exception as e:
-        print(f"Error generating thumbnail: {e}")
-        return (jsonify({'error': str(e)}), 500, headers)
+        print(f"❌ Error generating thumbnail: {e}")
+        print(f"📍 Error type: {type(e).__name__}")
+        # Don't raise exception to avoid function retries
 
 
-def _extract_blob_path_from_url(firebase_url):
-    """Extract blob path from Firebase Storage URL"""
-    # Example URL: https://firebasestorage.googleapis.com/v0/b/bucket/o/path%2Fto%2Ffile.pdf
-    import urllib.parse
-    
+def _extract_document_id_from_filename(file_name):
+    """
+    Extract document ID from the processed PDF filename
+    Strategy: Look up in Firestore using the filename pattern
+    """
     try:
-        # Parse the URL to get the object path
-        parts = firebase_url.split('/o/')
-        if len(parts) > 1:
-            encoded_path = parts[1].split('?')[0]  # Remove query parameters
-            return urllib.parse.unquote(encoded_path)
-        else:
-            raise ValueError("Invalid Firebase Storage URL format")
+        # Extract the filename part
+        filename = file_name.split('/')[-1]  # Get last part after /
+        print(f"🔍 Looking for document with filename pattern: {filename}")
+        
+        # Query Firestore to find document with matching filename pattern
+        # Look for documents where the storagePath contains this filename
+        files_ref = db.collection('files')
+        
+        # Search by original filename or storage path
+        query = files_ref.where('storagePath', '>=', file_name).where('storagePath', '<=', file_name + '\uf8ff').limit(1)
+        docs = query.stream()
+        
+        for doc in docs:
+            print(f"✅ Found document: {doc.id}")
+            return doc.id
+        
+        # Fallback: try to find by partial filename match
+        query = files_ref.where('status', '==', 'Completed').limit(50)
+        docs = query.stream()
+        
+        for doc in docs:
+            doc_data = doc.to_dict()
+            if 'pdfPath' in doc_data and filename in doc_data.get('pdfPath', ''):
+                print(f"✅ Found document by pdfPath match: {doc.id}")
+                return doc.id
+        
+        print(f"❌ No document found for filename: {filename}")
+        return None
+        
     except Exception as e:
-        raise ValueError(f"Failed to parse Firebase URL: {e}")
+        print(f"❌ Error extracting document ID: {e}")
+        return None
 
 
 def _generate_thumbnail_from_pdf(pdf_path):
@@ -137,52 +177,44 @@ def _generate_thumbnail_from_pdf(pdf_path):
         print(f"      Final zoom: {zoom:.3f}")
         
         # Create transformation matrix
-        mat = fitz.Matrix(zoom, zoom)
-        print(f"   🎯 Transformation matrix: {mat}")
+        matrix = fitz.Matrix(zoom, zoom)
         
-        # Render page to image
+        # Render page as image
         print(f"🖼️ Rendering page to image...")
-        start_time = time.time()
-        
-        pix = first_page.get_pixmap(matrix=mat, alpha=False)
+        pix = first_page.get_pixmap(matrix=matrix)
         img_data = pix.tobytes("png")
         
-        render_time = time.time() - start_time
-        print(f"   ⏱️ Render time: {render_time:.3f}s")
         print(f"   📏 Raw image size: {len(img_data):,} bytes")
         
-        # Open with PIL for final processing
-        print(f"🎨 Processing with PIL...")
-        img = Image.open(BytesIO(img_data))
+        # Convert to PIL Image
+        print(f"🔄 Converting to PIL Image...")
+        pil_image = Image.open(BytesIO(img_data))
         
-        img_width, img_height = img.size
-        print(f"   📐 Rendered dimensions: {img_width} x {img_height}")
+        print(f"   📐 PIL image size: {pil_image.size}")
         
-        # Create final thumbnail with white background
-        print(f"🎭 Creating final thumbnail...")
-        thumbnail = Image.new('RGB', THUMBNAIL_SIZE, 'white')
+        # Ensure proper aspect ratio and add professional styling
+        print(f"🎨 Adding professional styling...")
         
-        # Center the image on the thumbnail
+        # Create a white background canvas
+        canvas = Image.new('RGB', THUMBNAIL_SIZE, 'white')
+        
+        # Calculate positioning to center the image
+        img_width, img_height = pil_image.size
         x_offset = (THUMBNAIL_SIZE[0] - img_width) // 2
         y_offset = (THUMBNAIL_SIZE[1] - img_height) // 2
         
-        print(f"   📍 Centering offset: ({x_offset}, {y_offset})")
+        # Paste the image onto the canvas
+        canvas.paste(pil_image, (x_offset, y_offset))
         
-        thumbnail.paste(img, (x_offset, y_offset))
+        # Add subtle border like Adobe Scan
+        draw = ImageDraw.Draw(canvas)
+        border_color = (200, 200, 200)  # Light gray border
+        draw.rectangle([0, 0, THUMBNAIL_SIZE[0]-1, THUMBNAIL_SIZE[1]-1], outline=border_color, width=1)
         
-        # Add subtle border (like Adobe Scan)
-        print(f"🖊️ Adding border...")
-        draw = ImageDraw.Draw(thumbnail)
-        draw.rectangle(
-            [(0, 0), (THUMBNAIL_SIZE[0]-1, THUMBNAIL_SIZE[1]-1)], 
-            outline='#E0E0E0', 
-            width=1
-        )
-        
-        # Convert to bytes
-        print(f"💾 Converting to JPEG...")
+        # Convert to JPEG with compression
+        print(f"💾 Compressing to JPEG...")
         output_buffer = BytesIO()
-        thumbnail.save(output_buffer, format='JPEG', quality=THUMBNAIL_QUALITY, optimize=True)
+        canvas.save(output_buffer, format='JPEG', quality=THUMBNAIL_QUALITY, optimize=True)
         
         final_size = len(output_buffer.getvalue())
         compression_ratio = (len(img_data) / final_size) if final_size > 0 else 0

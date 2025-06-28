@@ -1,66 +1,63 @@
+// lib/features/home/presentation/widgets/upload_fab_widget.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:io';
+
 import '../bloc/home_bloc.dart';
-import '../../../camera/presentation/pages/camera_page.dart';
 
 class UploadFabWidget extends StatelessWidget {
   const UploadFabWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return FloatingActionButton.extended(
-      onPressed: () => _showUploadOptions(context),
-      tooltip: 'Add Document',
-      icon: const Icon(Icons.add),
-      label: const Text('Add'),
+    return BlocBuilder<HomeBloc, HomeState>(
+      builder: (context, state) {
+        // Disable upload if already uploading
+        final isUploading = state is HomeLoaded && state.uploadTask != null;
+        
+        return FloatingActionButton.extended(
+          onPressed: isUploading ? null : () {
+            _showUploadOptions(context);
+          },
+          icon: isUploading 
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : const Icon(Icons.upload_file),
+          label: Text(isUploading ? 'Uploading...' : 'Upload'),
+        );
+      },
     );
   }
 
   void _showUploadOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext bottomSheetContext) {
         return SafeArea(
           child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('Camera Scanner'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => CameraPage(
-                        onImageCaptured: (imagePath) {
-                          Navigator.of(context).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Image captured: $imagePath')),
-                          );
-                        },
-                      ),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
                 leading: const Icon(Icons.file_upload),
-                title: const Text('Upload File'),
+                title: const Text('Upload from Files'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _uploadFile(context);
+                  Navigator.pop(bottomSheetContext);
+                  // Use the original context that has access to HomeBloc
+                  context.read<HomeBloc>().add(UploadFileRequested());
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.chat),
-                title: const Text('Chat with AI'),
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Scan Document'),
                 onTap: () {
-                  Navigator.pop(context);
-                  // TODO: Navigate to chat screen
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Chat feature - to be implemented')),
-                  );
+                  Navigator.pop(bottomSheetContext);
+                  // This would navigate to camera screen
+                  // The camera screen would then trigger ScannedDocumentUpload event
+                  _navigateToCamera(context);
                 },
               ),
             ],
@@ -70,42 +67,16 @@ class UploadFabWidget extends StatelessWidget {
     );
   }
 
-  Future<void> _uploadFile(BuildContext context) async {
-    try {
-      // Pick file
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'],
-      );
-
-      if (result != null) {
-        final file = File(result.files.single.path!);
-        final fileName = result.files.single.name;
-        
-        // Show upload started message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Uploading $fileName...')),
-        );
-
-        // Trigger upload via BLoC
-        context.read<HomeBloc>().add(UploadFileRequested());
-        
-        // TODO: Implement actual file upload logic
-        // For now, just show success message
-        await Future.delayed(const Duration(seconds: 2));
-        
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$fileName uploaded successfully!')),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: $e')),
-        );
-      }
-    }
+  void _navigateToCamera(BuildContext context) {
+    // This would navigate to your camera page
+    // After scanning, the camera page would call:
+    // context.read<HomeBloc>().add(ScannedDocumentUpload(imagePath));
+    
+    // For now, just show a placeholder
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Camera feature integration coming next!'),
+      ),
+    );
   }
 }

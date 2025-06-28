@@ -11,6 +11,15 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Add these for dependency injection
+  get_it: ^7.6.9
+  
+  # Add these for routing  
+  go_router: ^14.6.1
+
+  equatable: ^2.0.5
+  flutter_bloc: ^8.1.6
+
   # UI and Icons
   cupertino_icons: ^1.0.8
 

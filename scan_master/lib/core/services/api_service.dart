@@ -7,6 +7,8 @@ import 'dart:convert';
 import '../config/api_config.dart';
 
 class ApiService {
+  ApiService();
+  
   // Singleton pattern for consistency with other services
   static ApiService? _instance;
   static ApiService get instance => _instance ??= ApiService._();
